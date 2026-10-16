@@ -4,27 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository shape
 
-Two things live here, and only one is code:
-
 - `wicher/` — the Swift package and app. **All source work happens here.**
-- `analysis/RE-findings.md` — reverse-engineering notes on Contexts.app, written with
-  REA (`.mcp.json` wires up the `rea` MCP server). It documents *which macOS mechanism*
-  a window switcher uses, tagging every claim **[OBS]** (observed) / **[INF]** (inferred)
-  / **[UNK]**. wicher is a clean reimplementation: no Contexts code, class names, icon,
-  or settings layout. Keep it that way, and keep the OBS/INF/UNK discipline if you edit
-  the findings.
-- `analysis/code-review.md` — review of wicher itself: root causes of the original
-  `tasks.md` issues (§1), and an open backlog of architecture / defect / perf / UX items
-  (§2–§6). Check it before refactoring; strike or update items as they land.
-- `tasks.md` — the user's running bug/issue list. Check it before starting work.
+  - `scripts/` — every shell script: `build.sh`, `make-icon.sh`,
+    `make-signing-identity.sh`. Each `cd`s to the package root itself, so they run from
+    anywhere.
+  - `README.md` — user-facing overview, build steps and source layout. Keep its Layout
+    section in sync when adding/removing source files.
+- `.mcp.json` / `.claude/skills/reverse-engineer-anything` — the REA setup the original
+  research on Contexts.app was done with (which macOS mechanisms a window switcher
+  uses). wicher is a clean reimplementation: no Contexts code, class names, icon, or
+  settings layout. Keep it that way.
 
-The root `package.json` is vestigial (npm placeholder); there is no JS in this project.
 The built `wicher/Wicher.app` is committed, so every rebuild shows up in `git status`.
 
 ## Build & run
 
 ```sh
-cd wicher && ./build.sh      # swift build -c release + assemble + ad-hoc sign Wicher.app
+wicher/scripts/build.sh      # swift build -c release + assemble + sign Wicher.app
 open wicher/Wicher.app       # first launch prompts for Accessibility
 cd wicher && swift test      # unit tests (WicherCoreTests)
 ```
@@ -32,7 +28,7 @@ cd wicher && swift test      # unit tests (WicherCoreTests)
 App icon: `wicher/Resources/Wicher.icon` (Icon Composer; light/dark/tinted/clear). Run
 `wicher/scripts/make-icon.sh` after editing it — it needs full Xcode and regenerates the
 committed `Resources/Assets.car` (macOS 26+), `Resources/Wicher.icns` (older macOS) and
-previews; `build.sh` only copies them, so CLT-only builds still work.
+`Resources/preview/`; `build.sh` only copies them, so CLT-only builds still work.
 
 `build.sh` also rewrites the binary's `LC_BUILD_VERSION` SDK field with `vtool`:
 SwiftPM stamps it with the deployment target (13.0), and AppKit then draws legacy
@@ -48,11 +44,11 @@ in `Tests/WicherCoreTests` use `@testable import WicherCore` and cover the pure 
 `WindowAssembly` (the scan → rows classification), `WindowGrouping`, `FuzzyMatcher`,
 `HUDMetrics`, `SwitcherSession` (incl. live updates), `HotKeyCombo`, `Settings` (via
 `Settings(defaults:)` on a test suite) — plus `SwitcherListView` layout rendered
-offscreen, and the Settings window's panes. Fixtures are hand-built (`axWindow: nil`; `AXUIElementCreateApplication` is
-fine where an element is required — it does no IPC). The AX/CGWindowList *collection*,
-hot keys, activation and the live HUD have no tests; verify those by building the app,
-granting Accessibility, and exercising ⌥Tab. Set `WICHER_SNAPSHOT_DIR` when running
-`swift test` to get a PNG of the list layout.
+offscreen, and the Settings window's panes. Fixtures are hand-built (`axWindow: nil`;
+`AXUIElementCreateApplication` is fine where an element is required — it does no IPC).
+The AX/CGWindowList *collection*, hot keys, activation and the live HUD have no tests;
+verify those by building the app, granting Accessibility, and exercising ⌥Tab. Set
+`WICHER_SNAPSHOT_DIR` when running `swift test` to get a PNG of the list layout.
 
 Signing: `build.sh` signs with the "Wicher Development" identity (override with
 `WICHER_SIGN_IDENTITY`) when it exists, else ad-hoc. Create it once with
@@ -115,7 +111,7 @@ database. Flow of one switch:
    timeout). App-only entries get a Dock-click-equivalent reopen.
 
 Settings window: `SettingsWindow` (AppKit window + `NSSplitViewController`, sidebar
-item) hosting SwiftUI panes (`SettingsViews`: grouped `Form`s) over `SettingsModel`,
+of General / Appearance / Switchers / About) hosting SwiftUI panes (`SettingsViews`: grouped `Form`s) over `SettingsModel`,
 which binds straight to `Settings.shared` and re-renders on `Settings.didChange` — no
 copies to drift. `ShortcutRecorder` stays AppKit, wrapped in an `NSViewRepresentable`.
 
@@ -143,8 +139,9 @@ inside the glass the scroll view settles after the list view's own layout pass.
 
 ## Invariants worth knowing before changing enumeration
 
-Enumeration is where most of the subtlety lives. Read `analysis/code-review.md` §1
-before touching it. Classification lives in `WindowAssembly` (tested); collection,
+Enumeration is where most of the subtlety lives; past regressions (apps vanishing,
+phantom fullscreen rows, wrong titles) all came from breaking one of the rules below.
+Classification lives in `WindowAssembly` (tested); collection,
 caching, `reconcile` and observers in `WindowEnumerator` (not tested).
 
 **Summon path.** `enumerate()` serves the cached snapshot if it is < `maxSnapshotAge`

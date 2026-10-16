@@ -5,12 +5,10 @@ A tiny macOS **window switcher** — an ⌘-Tab-style HUD that lists *windows*
 full **Light / Dark / System** appearance support.
 
 wicher is an independent, from-scratch reimplementation of the window-switcher
-idea popularized by Contexts. It was built after reverse-engineering Contexts
-with [REA](https://github.com/morluto/rea) to understand *what macOS mechanism*
-a window switcher uses — not its code or design. The findings (strictly
-separating what was observed from what was inferred) are in
-[`../analysis/RE-findings.md`](../analysis/RE-findings.md). No Contexts code,
-class names, icon, or settings layout were copied.
+idea popularized by Contexts. Contexts was studied with
+[REA](https://github.com/morluto/rea) only to learn *which macOS mechanisms* a
+window switcher relies on — no Contexts code, class names, icon, or settings
+layout were copied.
 
 ## What it does
 
@@ -28,11 +26,16 @@ class names, icon, or settings layout were copied.
   Ships with **⌥Tab** (all windows) and **⌥\`** (current app's windows).
   Per profile: *all apps / active app*, *all Spaces / visible Spaces*, and the
   three placement choices above.
-- Menu-bar item → **Preferences**:
+- **Liquid Glass** HUD on macOS 26+ (a blurred material on older systems).
+- Menu-bar item → **Settings…** (also ⌘, while the switcher is open). The menu-bar
+  icon can be hidden; open Wicher again from Finder or Spotlight to reach Settings.
+  - **General**: launch at login, menu-bar icon, hover/scroll selection,
+    show-delay, and **Copy Diagnostics** (what macOS reports about every app's
+    windows, for bug reports).
   - **Appearance**: Light / Dark / System (applied live to the HUD *and* the
     settings window) + **Icon size**, **Text size**, and **Row padding** sliders.
-  - **General**: show-delay, hover/scroll selection, launch at login.
   - **Switchers**: add/remove profiles and edit each one's shortcut + filters.
+  - **About**: version.
 
 ## Design goals
 
@@ -47,8 +50,9 @@ class names, icon, or settings layout were copied.
 ## Build & run
 
 ```sh
-./build.sh          # compiles and produces Wicher.app (installs nothing)
+scripts/build.sh    # compiles and produces Wicher.app (installs nothing)
 open Wicher.app     # first launch prompts for Accessibility access
+swift test          # unit tests
 ```
 
 Grant **System Settings → Privacy & Security → Accessibility → Wicher**, then
@@ -59,6 +63,10 @@ Tools). Development only: without a signing identity the app is **ad-hoc
 signed**, so macOS re-asks for Accessibility access after each rebuild. Run
 `scripts/make-signing-identity.sh` once to create a local self-signed identity;
 `build.sh` then signs with it and the grant survives rebuilds.
+
+The app icon is an Icon Composer document (`Resources/Wicher.icon`). After
+editing it, run `scripts/make-icon.sh` (needs full Xcode) to regenerate the
+committed `Assets.car`, `Wicher.icns` and previews; `build.sh` just copies them.
 
 ## Scope & known limitations
 
@@ -83,8 +91,11 @@ signed**, so macOS re-asks for Accessibility access after each rebuild. Run
 ```
 Package.swift            SwiftPM: WicherCore library, wicher executable, tests; macOS 13+
 Info.plist               LSUIElement agent-app bundle metadata
-build.sh                 compile + assemble Wicher.app + sign (stable identity or ad-hoc)
-scripts/make-signing-identity.sh  one-time local self-signed signing identity
+scripts/
+  build.sh               compile + assemble Wicher.app + sign (stable identity or ad-hoc)
+  make-signing-identity.sh  one-time local self-signed signing identity
+  make-icon.sh           Resources/Wicher.icon → Assets.car, Wicher.icns, previews (Xcode)
+Resources/               app icon source + prebuilt icon assets
 Sources/wicher/main.swift          entry point → WicherApp.run()
 Sources/WicherCore/                everything else (a library, so it is testable)
   WicherApp.swift         NSApplication setup (.accessory)
@@ -94,6 +105,8 @@ Sources/WicherCore/                everything else (a library, so it is testable
   AppearanceManager.swift AppearanceMode + Light/Dark/System → NSApp.appearance
   HUDMetrics.swift        icon/text/padding sliders → every pixel dimension
   HotKey.swift            Carbon RegisterEventHotKey wrapper + key-code names
+  SystemHotKeys.swift     find/disable/restore system shortcuts a switcher claims
+  ShortcutRecorder.swift  AppKit control that records a chord
   AXPrivate.swift         _AXUIElementGetWindow (Space correlation, with fallback)
   WindowInfo.swift        window / app-only model + stable WindowKey
   WindowEnumerator.swift  AX + CGWindowList collection, snapshot, observers, MRU
@@ -103,10 +116,11 @@ Sources/WicherCore/                everything else (a library, so it is testable
   FuzzyMatcher.swift      subsequence match + scoring + highlight ranges
   SwitcherSession.swift   one session: rows for the query + selection (pure)
   SwitcherController.swift session lifecycle, delay, monitors, hold-repeat, commit
-  SwitcherListView.swift  backdrop, search bar, pooled frame-placed rows
+  SwitcherListView.swift  backdrop (Liquid Glass / blur), search bar, pooled rows
   SwitcherRowView.swift   row + section header views
   SwitcherPanel.swift     non-activating HUD panel
-  PreferencesWindow.swift General + Appearance + Switchers settings
-  ProfileCardView.swift   one switcher's card + shortcut recorder
+  SettingsWindow.swift    settings window: sidebar split view hosting SwiftUI panes
+  SettingsViews.swift     General / Appearance / Switchers / About panes
+  SettingsModel.swift     observable bridge from the panes to Settings
 Tests/WicherCoreTests/    unit tests (swift test)
 ```

@@ -2,10 +2,10 @@
 #
 # Builds wicher and assembles Wicher.app around the SwiftPM-produced binary.
 # Requires an existing Swift toolchain (ships with Xcode / Command Line Tools).
-# Installs nothing.
+# Installs nothing. Run from anywhere: scripts/build.sh
 
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 APP="Wicher.app"
 CONFIG="release"

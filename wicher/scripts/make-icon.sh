@@ -2,7 +2,7 @@
 #
 # Compiles Resources/Wicher.icon (an Icon Composer document) into the files the
 # app bundle ships, and commits-ready previews. Needs full Xcode (actool, and
-# ictool inside Icon Composer.app); build.sh only copies the outputs, so a
+# ictool inside Icon Composer.app); scripts/build.sh only copies the outputs, so a
 # Command-Line-Tools-only machine can still build. Re-run after editing the icon.
 #
 #   Resources/Assets.car  — the Liquid Glass icon with light/dark/tinted/clear

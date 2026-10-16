@@ -4,7 +4,7 @@
 # imports it into a keychain (the login keychain by default). Run once.
 #
 # Why: an ad-hoc signature's cdhash changes on every rebuild, and macOS ties
-# the Accessibility grant to it, so every ./build.sh used to revoke access.
+# the Accessibility grant to it, so every build used to revoke access.
 # Signed with a stable certificate, the app's designated requirement stays the
 # same across rebuilds and the grant survives.
 #
@@ -50,4 +50,4 @@ PASS="wicher-$$"
 security import "$WORK/identity.p12" -k "$KEYCHAIN" -P "$PASS" -T /usr/bin/codesign >/dev/null
 
 echo "✓ Created code-signing identity \"$NAME\" in $KEYCHAIN"
-echo "  ./build.sh will use it from now on. Grant Accessibility once more after the next build."
+echo "  scripts/build.sh will use it from now on. Grant Accessibility once more after the next build."
