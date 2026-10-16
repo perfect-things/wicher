@@ -31,6 +31,8 @@ final class Settings {
         static let profiles = "profiles"
         static let showMenuBarIcon = "showMenuBarIcon"
         static let highlightStyle = "highlightStyle"
+        static let showAppNames = "showAppNames"
+        static let panelWidthScale = "panelWidthScale"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -45,6 +47,8 @@ final class Settings {
             Key.showDelayMs: 180,
             Key.showMenuBarIcon: true,
             Key.highlightStyle: HighlightStyle.glass.rawValue,
+            Key.showAppNames: true,
+            Key.panelWidthScale: 100,
         ])
     }
 
@@ -70,6 +74,19 @@ final class Settings {
     var textSize: Int {
         get { defaults.integer(forKey: Key.textSize).clamped(to: HUDMetrics.textRange) }
         set { defaults.set(newValue.clamped(to: HUDMetrics.textRange), forKey: Key.textSize); post(.metrics) }
+    }
+
+    /// Percent of the icon-derived panel width (see `HUDMetrics.make`).
+    var panelWidthScale: Int {
+        get { defaults.integer(forKey: Key.panelWidthScale).clamped(to: HUDMetrics.widthScaleRange) }
+        set { defaults.set(newValue.clamped(to: HUDMetrics.widthScaleRange), forKey: Key.panelWidthScale); post(.metrics) }
+    }
+
+    /// The app-name column left of each row's icon. Off, rows are just
+    /// icon + title. Part of `HUDMetrics`, so it applies on the next open.
+    var showAppNames: Bool {
+        get { defaults.bool(forKey: Key.showAppNames) }
+        set { defaults.set(newValue, forKey: Key.showAppNames); post(.metrics) }
     }
 
     /// Vertical padding above/below each row's content, in points.

@@ -151,4 +151,19 @@ final class SwitcherListViewTests: XCTestCase {
         XCTAssertEqual(rowFrames(view).map(\.width),
                        Array(repeating: metrics.panelWidth - 2 * metrics.listInset, count: 2))
     }
+
+    func testRowsWithoutAppNamesStartWithTheIcon() {
+        let plain = HUDMetrics.make(iconSize: 32, textSize: 16, rowPadding: 7, showAppNames: false)
+        let view = makeView()
+        view.render(rows(1), metrics: plain)
+        view.layoutSubtreeIfNeeded()
+        let row = rowSubviews(view).compactMap { $0 as? SwitcherRowView }.first!
+        row.layoutSubtreeIfNeeded()
+        let visible = row.subviews.filter { !$0.isHidden }
+        XCTAssertFalse(visible.contains { ($0 as? NSTextField)?.stringValue == "App 0" })
+        let icon = visible.first { $0 is NSImageView }!
+        XCTAssertEqual(icon.frame.minX, 14)
+        let title = visible.first { $0 is NSTextField }!
+        XCTAssertGreaterThan(title.frame.minX, icon.frame.maxX)
+    }
 }

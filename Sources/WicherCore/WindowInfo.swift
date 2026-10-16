@@ -46,6 +46,9 @@ final class WindowInfo {
         self.onCurrentSpace = onCurrentSpace
     }
 
+    /// One of wicher's own windows (Settings), raised directly, not via AX.
+    var isOwnWindow: Bool { pid == ProcessInfo.processInfo.processIdentifier && !isAppOnly }
+
     /// Primary label: window title, falling back to the app name.
     var displayTitle: String { title.isEmpty ? appName : title }
 

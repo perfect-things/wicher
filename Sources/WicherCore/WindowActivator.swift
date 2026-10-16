@@ -15,10 +15,10 @@ enum WindowActivator {
         // One of our own windows (Settings). We own it, so order it front
         // directly — AX and the Dock-click reopen would both be indirections
         // around something we can simply do.
-        if info.pid == ProcessInfo.processInfo.processIdentifier, !info.isAppOnly {
+        if info.isOwnWindow {
             if let window = NSApp.windows.first(where: { $0.cgWindowID == info.cgWindowID }) {
                 if window.isMiniaturized { window.deminiaturize(nil) }
-                if #available(macOS 14, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }
+                activateSelf()
                 window.makeKeyAndOrderFront(nil)
                 if let wid = info.cgWindowID {
                     WindowEnumerator.shared.noteActivatedWindow(wid, pid: info.pid)
@@ -48,6 +48,17 @@ enum WindowActivator {
         } else {
             WindowEnumerator.shared.noteActivated(pid: info.pid)
         }
+    }
+
+    /// Makes wicher the active app. Only the deprecated
+    /// `activate(ignoringOtherApps: true)` does this from the background:
+    /// `NSApp.activate()` and `NSRunningApplication.current.activate()` are
+    /// cooperative on macOS 14+ and are ignored while another app is active
+    /// (an `.accessory` app is, nearly always), and `orderFrontRegardless`
+    /// still lands below the active app's windows. Called through
+    /// `SelfActivating` so the deprecation doesn't warn at every call site.
+    static func activateSelf() {
+        (NSApp as SelfActivating).activateIgnoringOtherApps()
     }
 
     static func raise(_ axWindow: AXUIElement) {
@@ -81,6 +92,13 @@ enum WindowActivator {
     private static func bundleURL(forPID pid: pid_t) -> URL? {
         NSRunningApplication(processIdentifier: pid)?.bundleURL
     }
+}
+
+private protocol SelfActivating { func activateIgnoringOtherApps() }
+
+@available(macOS, deprecated: 14)
+extension NSApplication: SelfActivating {
+    fileprivate func activateIgnoringOtherApps() { activate(ignoringOtherApps: true) }
 }
 
 /// Un-minimizes a window and raises it once the Dock animation has finished.

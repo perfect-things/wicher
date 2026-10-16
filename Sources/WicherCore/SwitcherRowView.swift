@@ -6,7 +6,8 @@ protocol SwitcherRowViewDelegate: AnyObject {
 }
 
 /// A single list row laid out like a classic window switcher:
-/// `[ app name — right aligned ] [ icon ] [ window title … ]`.
+/// `[ app name — right aligned ] [ icon ] [ window title … ]`, or just
+/// `[ icon ] [ window title … ]` when the metrics have no app column.
 /// All colors are semantic, so the row adapts to Light/Dark automatically.
 ///
 /// Reused across renders (see `SwitcherListView`), so `displayIndex` and the
@@ -30,11 +31,6 @@ final class SwitcherRowView: NSView {
         didSet { if isSelected != oldValue { applySelectionAppearance() } }
     }
 
-    private static let leadingInset: CGFloat = 14
-    private static let trailingInset: CGFloat = 16
-    private static let appToIcon: CGFloat = 10
-    private static let iconToTitle: CGFloat = 12
-
     init(metrics: HUDMetrics) {
         self.metrics = metrics
         super.init(frame: .zero)
@@ -51,6 +47,7 @@ final class SwitcherRowView: NSView {
         appField.alignment = .right
         appField.textColor = .secondaryLabelColor
 
+        appField.isHidden = metrics.appColumnWidth == 0
         for v in [appField, iconView, titleField] { addSubview(v) }
 
         // `.inVisibleRect` keeps the hover region matched to what is actually
@@ -76,12 +73,16 @@ final class SwitcherRowView: NSView {
         func centered(_ x: CGFloat, _ width: CGFloat, _ height: CGFloat) -> NSRect {
             NSRect(x: x, y: ((h - height) / 2).rounded(), width: max(0, width), height: height)
         }
-        let appHeight = ceil(appField.intrinsicContentSize.height)
-        appField.frame = centered(Self.leadingInset, metrics.appColumnWidth, appHeight)
-        iconView.frame = centered(appField.frame.maxX + Self.appToIcon, metrics.iconSize, metrics.iconSize)
-        let titleX = iconView.frame.maxX + Self.iconToTitle
+        var iconX = HUDMetrics.rowLeadingInset
+        if metrics.appColumnWidth > 0 {
+            let appHeight = ceil(appField.intrinsicContentSize.height)
+            appField.frame = centered(HUDMetrics.rowLeadingInset, metrics.appColumnWidth, appHeight)
+            iconX = appField.frame.maxX + HUDMetrics.appToIcon
+        }
+        iconView.frame = centered(iconX, metrics.iconSize, metrics.iconSize)
+        let titleX = iconView.frame.maxX + HUDMetrics.iconToTitle
         let titleHeight = ceil(titleField.intrinsicContentSize.height)
-        titleField.frame = centered(titleX, bounds.width - Self.trailingInset - titleX, titleHeight)
+        titleField.frame = centered(titleX, bounds.width - HUDMetrics.rowTrailingInset - titleX, titleHeight)
     }
 
     private func applySelectionAppearance() {

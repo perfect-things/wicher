@@ -15,7 +15,7 @@ final class SettingsWindow: NSObject {
     func show(pane: SettingsPane? = nil) {
         if window == nil { build() }
         if let pane { model.pane = pane }
-        if #available(macOS 14, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }
+        WindowActivator.activateSelf()
         window?.makeKeyAndOrderFront(nil)
     }
 

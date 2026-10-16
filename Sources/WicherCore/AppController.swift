@@ -228,7 +228,7 @@ final class AppController: NSObject, NSApplicationDelegate {
                 + "If it is already enabled, toggle it off and on again."
             alert.alertStyle = .informational
             alert.addButton(withTitle: "OK")
-            if #available(macOS 14, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }
+            WindowActivator.activateSelf()
             alert.runModal()
         }
     }

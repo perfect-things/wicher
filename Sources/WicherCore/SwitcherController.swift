@@ -94,7 +94,9 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     private func beginSession(profile: SwitcherProfile, forward: Bool) {
         metrics = HUDMetrics.make(iconSize: Settings.shared.iconSize,
                                   textSize: Settings.shared.textSize,
-                                  rowPadding: Settings.shared.rowPadding)
+                                  rowPadding: Settings.shared.rowPadding,
+                                  widthScale: Settings.shared.panelWidthScale,
+                                  showAppNames: Settings.shared.showAppNames)
         sessionScreen = screenWithMouse() ?? NSScreen.main
         let activeAppPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         // Make sure the window currently in front is the most-recent one, so a

@@ -4,11 +4,6 @@ A tiny macOS **window switcher** — an ⌘-Tab-style HUD that lists *windows*
 (not just apps) across every running application, with type-to-search and
 full **Light / Dark / System** appearance support.
 
-wicher is an independent, from-scratch reimplementation of the window-switcher
-idea popularized by Contexts. Contexts was studied with
-[REA](https://github.com/morluto/rea) only to learn *which macOS mechanisms* a
-window switcher relies on — no Contexts code, class names, icon, or settings
-layout were copied.
 
 ## What it does
 
@@ -16,7 +11,7 @@ layout were copied.
   windows, ordered most-recently-used.
 - **Hold ⌥, tap Tab** to cycle; **release ⌥** to switch. A quick tap+release
   within the show-delay switches to the previous window *without* drawing the
-  panel (like macOS ⌘-Tab). Or use ↑/↓, scroll, or the mouse. **⇧⌥Tab** cycles
+  panel. Or use ↑/↓, scroll, or the mouse. **⇧⌥Tab** cycles
   backward. **Esc** cancels.
 - **Type** to fuzzy-search window titles / app names, with matched characters
   emphasized. Release ⌥ to jump to the top match.
@@ -33,7 +28,7 @@ layout were copied.
     show-delay, and **Copy Diagnostics** (what macOS reports about every app's
     windows, for bug reports).
   - **Appearance**: Light / Dark / System (applied live to the HUD *and* the
-    settings window) + **Icon size**, **Text size**, and **Row padding** sliders.
+    settings window), selection highlight, **Icon size**, **Text size** and **Row padding**, and **Panel width** (30–150 % of the icon-derived width) sliders, and **Show app names** (off: rows are just icon + title).
   - **Switchers**: add/remove profiles and edit each one's shortcut + filters.
   - **About**: version.
 
@@ -41,18 +36,17 @@ layout were copied.
 
 - **Small & fast.** Pure AppKit + Carbon + Accessibility + CoreGraphics. No
   bundled database, no WebKit — recency is kept in memory, settings in
-  `UserDefaults`. (Contexts, by contrast, links Realm *and* sqlite *and* WebKit.)
+  `UserDefaults`.
 - **Minimal permissions.** Needs only **Accessibility** — window titles are read
-  via the Accessibility API, so it does *not* require Screen Recording the way
-  `kCGWindowName` would.
-- **Agent app.** `LSUIElement` — no Dock icon; lives in the menu bar.
+  via the Accessibility API, so it does *not* require Screen Recording.
+- **Menubar app.** — no Dock icon; lives in the menu bar.
 
 ## Build & run
 
 ```sh
 scripts/build.sh    # compiles and produces Wicher.app (installs nothing)
-open Wicher.app     # first launch prompts for Accessibility access
 swift test          # unit tests
+open Wicher.app     # first launch prompts for Accessibility access
 ```
 
 Grant **System Settings → Privacy & Security → Accessibility → Wicher**, then
@@ -69,9 +63,6 @@ editing it, run `scripts/make-icon.sh` (needs full Xcode) to regenerate the
 committed `Assets.car`, `Wicher.icns` and previews; `build.sh` just copies them.
 
 ## Scope & known limitations
-
-- **Window switcher only** — the Contexts sidebar and trackpad gestures are out
-  of scope by design.
 - **Space filtering** ("visible Spaces") correlates each AX window with its
   `CGWindowID` via the private `_AXUIElementGetWindow`. If that symbol is ever
   unavailable the filter degrades safely (every window is treated as current).

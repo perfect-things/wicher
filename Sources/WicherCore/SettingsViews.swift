@@ -130,10 +130,17 @@ private struct AppearancePane: View {
                             range: HUDMetrics.textRange, unit: "pt")
                 ValueSlider(title: "Row padding", value: model.binding(\.rowPadding),
                             range: HUDMetrics.paddingRange, unit: "pt")
+                ValueSlider(title: "Panel width",
+                            subtitle: "Relative to the width that suits the icon size.",
+                            value: model.binding(\.panelWidthScale),
+                            range: HUDMetrics.widthScaleRange, step: 5, unit: "%")
+                SettingToggle("Show app names",
+                              hint: "Off, each row is just the app icon and the window title.",
+                              isOn: model.binding(\.showAppNames))
             } header: {
                 Text("Switcher panel")
             } footer: {
-                Text("Size changes apply the next time the switcher opens.")
+                Text("Changes here apply the next time the switcher opens.")
                     .font(.callout).foregroundStyle(.secondary)
             }
         }
@@ -282,12 +289,15 @@ private struct ValueSlider: View {
     var subtitle: String?
     @Binding var value: Int
     let range: ClosedRange<Int>
+    var step = 1
     let unit: String
 
     var body: some View {
         LabeledContent {
             HStack(spacing: 10) {
-                Slider(value: Binding(get: { Double(value) }, set: { value = Int($0.rounded()) }),
+                // Snapped here, not with `Slider(step:)`, which draws tick marks.
+                Slider(value: Binding(get: { Double(value) },
+                                      set: { value = Int(($0 / Double(step)).rounded()) * step }),
                        in: Double(range.lowerBound)...Double(range.upperBound))
                     .labelsHidden()
                     .frame(minWidth: 120, maxWidth: 220)

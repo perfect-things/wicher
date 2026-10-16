@@ -12,13 +12,9 @@ The repo root is the Swift package (`Package.swift`, `Sources/`, `Tests/`, `Reso
   anywhere.
 - `README.md` — user-facing overview, build steps and source layout. Keep its Layout
   section in sync when adding/removing source files.
-- `.mcp.json` / `.claude/skills/reverse-engineer-anything` — the REA setup the original
-  research on Contexts.app was done with (which macOS mechanisms a window switcher
-  uses). wicher is a clean reimplementation: no Contexts code, class names, icon, or
-  settings layout. Keep it that way.
 
 `Wicher.app` (built by `scripts/build.sh` at the root) and `.build/` are gitignored —
-never commit build products. History was rewritten once to purge old `.app` copies.
+never commit build products.
 
 ## Build & run
 
