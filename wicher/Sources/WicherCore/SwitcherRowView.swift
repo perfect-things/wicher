@@ -8,9 +8,14 @@ protocol SwitcherRowViewDelegate: AnyObject {
 /// A single list row laid out like a classic window switcher:
 /// `[ app name — right aligned ] [ icon ] [ window title … ]`.
 /// All colors are semantic, so the row adapts to Light/Dark automatically.
+///
+/// Reused across renders (see `SwitcherListView`), so `displayIndex` and the
+/// content change; the metrics a row was built with do not. Subviews are
+/// placed by frame — every dimension is already known from `HUDMetrics`.
 final class SwitcherRowView: NSView {
     weak var delegate: SwitcherRowViewDelegate?
-    let displayIndex: Int
+    var displayIndex = 0
+    private let metrics: HUDMetrics
 
     private let iconView = NSImageView()
     private let titleField = NSTextField(labelWithString: "")
@@ -23,8 +28,13 @@ final class SwitcherRowView: NSView {
         didSet { if isSelected != oldValue { applySelectionAppearance() } }
     }
 
-    init(displayIndex: Int, metrics: HUDMetrics) {
-        self.displayIndex = displayIndex
+    private static let leadingInset: CGFloat = 14
+    private static let trailingInset: CGFloat = 16
+    private static let appToIcon: CGFloat = 10
+    private static let iconToTitle: CGFloat = 12
+
+    init(metrics: HUDMetrics) {
+        self.metrics = metrics
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 8
@@ -38,25 +48,7 @@ final class SwitcherRowView: NSView {
         appField.alignment = .right
         appField.textColor = .secondaryLabelColor
 
-        for v in [appField, iconView, titleField] {
-            v.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(v)
-        }
-
-        NSLayoutConstraint.activate([
-            appField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            appField.widthAnchor.constraint(equalToConstant: metrics.appColumnWidth),
-            appField.centerYAnchor.constraint(equalTo: centerYAnchor),
-
-            iconView.leadingAnchor.constraint(equalTo: appField.trailingAnchor, constant: 10),
-            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: metrics.iconSize),
-            iconView.heightAnchor.constraint(equalToConstant: metrics.iconSize),
-
-            titleField.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 12),
-            titleField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-            titleField.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
+        for v in [appField, iconView, titleField] { addSubview(v) }
 
         // `.inVisibleRect` keeps the hover region matched to what is actually
         // visible as the list scrolls; AppKit maintains the rect for us.
@@ -73,6 +65,20 @@ final class SwitcherRowView: NSView {
         iconView.image = icon
         titleField.attributedStringValue = title
         appField.stringValue = appName
+    }
+
+    override func layout() {
+        super.layout()
+        let h = bounds.height
+        func centered(_ x: CGFloat, _ width: CGFloat, _ height: CGFloat) -> NSRect {
+            NSRect(x: x, y: ((h - height) / 2).rounded(), width: max(0, width), height: height)
+        }
+        let appHeight = ceil(appField.intrinsicContentSize.height)
+        appField.frame = centered(Self.leadingInset, metrics.appColumnWidth, appHeight)
+        iconView.frame = centered(appField.frame.maxX + Self.appToIcon, metrics.iconSize, metrics.iconSize)
+        let titleX = iconView.frame.maxX + Self.iconToTitle
+        let titleHeight = ceil(titleField.intrinsicContentSize.height)
+        titleField.frame = centered(titleX, bounds.width - Self.trailingInset - titleX, titleHeight)
     }
 
     private func applySelectionAppearance() {
@@ -107,18 +113,26 @@ final class SwitcherRowView: NSView {
 
 /// A dim, centered section header ("Minimized", "Apps", …). Not selectable.
 final class SwitcherHeaderView: NSView {
-    init(title: String, metrics: HUDMetrics) {
+    private let label = NSTextField(labelWithString: "")
+
+    var title: String {
+        get { label.stringValue }
+        set { label.stringValue = newValue; needsLayout = true }
+    }
+
+    init(metrics: HUDMetrics) {
         super.init(frame: .zero)
-        let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: metrics.appSize, weight: .semibold)
         label.textColor = .tertiaryLabelColor
         label.alignment = .center
-        label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
-        NSLayoutConstraint.activate([
-            label.centerXAnchor.constraint(equalTo: centerXAnchor),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
     }
+
     required init?(coder: NSCoder) { preconditionFailure("not used") }
+
+    override func layout() {
+        super.layout()
+        let height = ceil(label.intrinsicContentSize.height)
+        label.frame = NSRect(x: 0, y: ((bounds.height - height) / 2).rounded(), width: bounds.width, height: height)
+    }
 }

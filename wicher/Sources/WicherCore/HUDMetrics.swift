@@ -4,7 +4,7 @@ import AppKit
 /// icon size, text size, and row padding (vertical space above/below the row
 /// content). Rows are packed with zero inter-row spacing; density is controlled
 /// entirely by padding.
-struct HUDMetrics {
+struct HUDMetrics: Equatable {
     let iconSize: CGFloat
     let titleSize: CGFloat
     let appSize: CGFloat

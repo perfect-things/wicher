@@ -1,7 +1,7 @@
 import AppKit
 
-/// A flipped vertical stack so arranged rows lay out top-to-bottom in a scroll view.
-private final class FlippedStack: NSStackView {
+/// The scroll view's document: rows are placed by frame, top to bottom.
+private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
@@ -9,6 +9,11 @@ private final class FlippedStack: NSStackView {
 /// scrolling list of rows. Turns `[DisplayRow]` into views, shows the
 /// selection, and reports the height it wants. Knows nothing about sessions,
 /// screens or the panel it sits in.
+///
+/// Row views are pooled and reconfigured rather than rebuilt: typing a query
+/// re-renders on every keystroke, and with dozens of windows rebuilding meant
+/// dozens of view allocations and hundreds of constraints per character. Rows
+/// have fixed heights from `HUDMetrics`, so they are placed by frame.
 final class SwitcherListView: NSVisualEffectView {
     /// Receives hover/click from every row this view creates.
     weak var rowDelegate: SwitcherRowViewDelegate?
@@ -16,7 +21,7 @@ final class SwitcherListView: NSVisualEffectView {
     private let searchContainer = NSView()
     private let searchField = NSTextField(labelWithString: "")
     private let scrollView = NSScrollView()
-    private let stack = FlippedStack()
+    private let document = FlippedView()
     private var searchHeight: NSLayoutConstraint!
     private var query = ""
     /// Shown in the search bar's place while there is no query — e.g. a
@@ -25,12 +30,17 @@ final class SwitcherListView: NSVisualEffectView {
 
     private var rows: [DisplayRow] = []
     private var metrics = HUDMetrics.make(iconSize: 32, textSize: 16, rowPadding: 7)
-    private var rowViews: [Int: SwitcherRowView] = [:] // row index -> view
+    /// Reusable views. Index i is the i-th item (or header) of the current render.
+    private var itemPool: [SwitcherRowView] = []
+    private var headerPool: [SwitcherHeaderView] = []
+    private var rowViews: [Int: SwitcherRowView] = [:] // row index -> view, current render only
 
     /// Corner radius of the HUD. Used for both the backdrop mask and the
     /// layer clip so the two never disagree.
     private static let cornerRadius: CGFloat = 16
     private static let searchBarHeight: CGFloat = 52
+    /// Padding around the list inside the scroll view.
+    private static let listInsets = NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
 
     init() {
         super.init(frame: .zero)
@@ -78,17 +88,11 @@ final class SwitcherListView: NSVisualEffectView {
         searchField.translatesAutoresizingMaskIntoConstraints = false
         searchContainer.addSubview(searchField)
 
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 0
-        stack.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = false
         scrollView.automaticallyAdjustsContentInsets = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.documentView = stack
+        scrollView.documentView = document
 
         addSubview(searchContainer)
         addSubview(scrollView)
@@ -108,9 +112,6 @@ final class SwitcherListView: NSVisualEffectView {
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
-
-            stack.topAnchor.constraint(equalTo: scrollView.topAnchor),
-            stack.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
         ])
     }
 
@@ -143,43 +144,86 @@ final class SwitcherListView: NSVisualEffectView {
         searchHeight.constant = (query.isEmpty && notice == nil) ? 0 : Self.searchBarHeight
     }
 
-    /// Replaces every row view with ones built from `rows`.
+    /// Shows `rows`, reusing row views from the previous render.
     func render(_ rows: [DisplayRow], metrics: HUDMetrics) {
+        if metrics != self.metrics {
+            // Fonts and column widths are baked into the views; start over.
+            itemPool.forEach { $0.removeFromSuperview() }
+            headerPool.forEach { $0.removeFromSuperview() }
+            itemPool.removeAll()
+            headerPool.removeAll()
+        }
         self.rows = rows
         self.metrics = metrics
         rowViews.removeAll()
-        stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
+        var items = 0
+        var headers = 0
         for (rowIndex, row) in rows.enumerated() {
             switch row {
             case let .header(title):
-                let header = SwitcherHeaderView(title: title, metrics: metrics)
-                header.translatesAutoresizingMaskIntoConstraints = false
-                stack.addArrangedSubview(header)
-                NSLayoutConstraint.activate([
-                    header.heightAnchor.constraint(equalToConstant: metrics.headerHeight),
-                    header.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: stack.edgeInsets.left),
-                    header.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -stack.edgeInsets.right),
-                ])
+                if headers == headerPool.count {
+                    let header = SwitcherHeaderView(metrics: metrics)
+                    headerPool.append(header)
+                    document.addSubview(header)
+                }
+                let header = headerPool[headers]
+                header.title = title
+                header.isHidden = false
+                headers += 1
             case let .item(info, ranges):
-                let view = SwitcherRowView(displayIndex: rowIndex, metrics: metrics)
-                view.delegate = rowDelegate
-                view.translatesAutoresizingMaskIntoConstraints = false
+                if items == itemPool.count {
+                    let view = SwitcherRowView(metrics: metrics)
+                    view.delegate = rowDelegate
+                    itemPool.append(view)
+                    document.addSubview(view)
+                }
+                let view = itemPool[items]
+                view.displayIndex = rowIndex
+                view.isSelected = false
                 view.configure(icon: info.appIcon,
                                title: attributedTitle(info.displayTitle, ranges: ranges),
                                appName: info.appName)
-                stack.addArrangedSubview(view)
-                NSLayoutConstraint.activate([
-                    view.heightAnchor.constraint(equalToConstant: metrics.rowHeight),
-                    view.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: stack.edgeInsets.left),
-                    view.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -stack.edgeInsets.right),
-                ])
+                view.isHidden = false
                 rowViews[rowIndex] = view
+                items += 1
             }
         }
+        itemPool[items...].forEach { $0.isHidden = true }
+        headerPool[headers...].forEach { $0.isHidden = true }
+        layoutRows()
     }
 
-    /// Drops every row view (between sessions).
+    /// Places the visible rows top to bottom and sizes the document to fit.
+    private func layoutRows() {
+        let insets = Self.listInsets
+        let width = scrollView.contentSize.width
+        let rowWidth = max(0, width - insets.left - insets.right)
+        var y = insets.top
+        var items = 0
+        var headers = 0
+        for row in rows {
+            switch row {
+            case .header:
+                headerPool[headers].frame = NSRect(x: insets.left, y: y, width: rowWidth, height: metrics.headerHeight)
+                headers += 1
+                y += metrics.headerHeight
+            case .item:
+                itemPool[items].frame = NSRect(x: insets.left, y: y, width: rowWidth, height: metrics.rowHeight)
+                items += 1
+                y += metrics.rowHeight
+            }
+        }
+        document.frame = NSRect(x: 0, y: 0, width: width, height: y + insets.bottom)
+    }
+
+    override func layout() {
+        super.layout()
+        // The panel is resized after `render`, so the row width is only final now.
+        if document.frame.width != scrollView.contentSize.width { layoutRows() }
+    }
+
+    /// Hides every row (between sessions). Views stay pooled for the next one.
     func clear() {
         render([], metrics: metrics)
     }
@@ -212,13 +256,12 @@ final class SwitcherListView: NSVisualEffectView {
     /// the list, with the list capped at `maxListHeight` (it scrolls beyond).
     /// An empty list still reserves one row's height.
     func preferredHeight(maxListHeight: CGFloat) -> CGFloat {
-        var contentHeight: CGFloat = stack.edgeInsets.top + stack.edgeInsets.bottom
-        for (i, row) in rows.enumerated() {
+        var contentHeight: CGFloat = Self.listInsets.top + Self.listInsets.bottom
+        for row in rows {
             switch row {
             case .header: contentHeight += metrics.headerHeight
             case .item: contentHeight += metrics.rowHeight
             }
-            if i < rows.count - 1 { contentHeight += stack.spacing }
         }
         if rows.isEmpty { contentHeight += metrics.rowHeight }
         return searchHeight.constant + min(contentHeight, maxListHeight)
