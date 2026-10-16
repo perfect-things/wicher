@@ -144,6 +144,21 @@ wrinkle worth remembering: `PreferencesWindow` sets `isReleasedWhenClosed = fals
 so a *closed* Preferences window stays in `NSApp.windows` and has to be filtered out
 by `isVisible || isMiniaturized`.
 
+A second, sharper one: `NSWindow.windowNumber` is an `Int` and is **not** always a
+valid `CGWindowID`. A window with no backing device reports zero or negative, and the
+status-bar item's window reports 2^32 — positive, but outside `UInt32`, so
+`CGWindowID(window.windowNumber)` traps at runtime and takes the process with it. It
+crashed on launch, before anything was on screen. `NSWindow.cgWindowID` now returns an
+optional via `CGWindowID(exactly:)`; neither kind of window appears in CGWindowList,
+so nil is the correct answer for both. Worth a general note: unconditional
+`FixedWidthInteger` conversions on values that come from AppKit are a trap in both
+senses, and `init(exactly:)` costs nothing.
+
+Procedural lesson, since this shipped: "it compiles" is not a smoke test for an app
+with no test target. Launching the built bundle and confirming the process is still
+alive some seconds later would have caught this in one command, and is the cheapest
+possible gate before handing a build over.
+
 The same gating hid other agent apps' windows, so the CGWindowList fallback now
 applies to non-`.regular` apps too — but only for windows it is confident about (on
 screen now, or previously titled through AX). Guessing a stand-in row from an

@@ -57,6 +57,21 @@ private struct ScannedWindow {
     let wid: CGWindowID?
 }
 
+extension NSWindow {
+    /// This window's `CGWindowID`, or nil if it does not have one.
+    ///
+    /// `windowNumber` is an `Int`, and not every AppKit window has a number
+    /// that is a real CGWindowID. A window with no backing device reports zero
+    /// or negative, and the status-bar item's window reports 2^32 — positive,
+    /// but out of `CGWindowID`'s range, so converting it unconditionally traps
+    /// at runtime. Neither kind appears in CGWindowList, so nil is the right
+    /// answer for both.
+    var cgWindowID: CGWindowID? {
+        guard windowNumber > 0 else { return nil }
+        return CGWindowID(exactly: windowNumber)
+    }
+}
+
 /// One of wicher's own windows, read in-process rather than through AX.
 private struct SelfWindow {
     let number: CGWindowID
@@ -824,7 +839,7 @@ final class WindowEnumerator {
     /// Main thread only; `NSApp` is not safe to read from the scan queue.
     private func cacheSelfWindows() {
         let list: [SelfWindow] = NSApp.windows.compactMap { window in
-            guard window.windowNumber > 0,
+            guard let number = window.cgWindowID,
                   !(window is SwitcherPanel),            // the borderless HUD
                   !window.title.isEmpty,
                   // Preferences is kept alive after closing
@@ -834,7 +849,7 @@ final class WindowEnumerator {
                   // is not, but belongs in the list.
                   window.isVisible || window.isMiniaturized
             else { return nil }
-            return SelfWindow(number: CGWindowID(window.windowNumber),
+            return SelfWindow(number: number,
                               title: window.title,
                               minimized: window.isMiniaturized)
         }

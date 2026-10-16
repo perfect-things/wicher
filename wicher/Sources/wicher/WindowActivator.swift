@@ -16,7 +16,7 @@ enum WindowActivator {
         // directly — AX and the Dock-click reopen would both be indirections
         // around something we can simply do.
         if info.pid == ProcessInfo.processInfo.processIdentifier, !info.isAppOnly {
-            if let window = NSApp.windows.first(where: { CGWindowID($0.windowNumber) == info.cgWindowID }) {
+            if let window = NSApp.windows.first(where: { $0.cgWindowID == info.cgWindowID }) {
                 if window.isMiniaturized { window.deminiaturize(nil) }
                 NSApp.activate(ignoringOtherApps: true)
                 window.makeKeyAndOrderFront(nil)
