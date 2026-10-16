@@ -95,13 +95,37 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
 
     // MARK: - Chrome (built once)
 
+    /// Corner radius of the HUD. Used for both the backdrop mask and the
+    /// layer clip so the two never disagree.
+    private static let cornerRadius: CGFloat = 16
+
+    /// A resizable rounded-rect mask for the visual-effect view.
+    ///
+    /// `layer.cornerRadius` only clips what *AppKit* draws; the blurred
+    /// backdrop behind an `NSVisualEffectView` is composited by the window
+    /// server and ignores the layer entirely, which is why the HUD used to
+    /// show a square patch of blurred desktop in each corner. `maskImage` is
+    /// the supported way to shape the backdrop itself.
+    private static func backdropMask(radius: CGFloat) -> NSImage {
+        let edge = radius * 2 + 1
+        let image = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
+        image.resizingMode = .stretch
+        return image
+    }
+
     private func buildChrome() {
         visualEffect.material = .hudWindow
         visualEffect.blendingMode = .behindWindow
         visualEffect.state = .active
         visualEffect.wantsLayer = true
-        visualEffect.layer?.cornerRadius = 16
+        visualEffect.layer?.cornerRadius = Self.cornerRadius
         visualEffect.layer?.masksToBounds = true
+        visualEffect.maskImage = Self.backdropMask(radius: Self.cornerRadius)
         visualEffect.translatesAutoresizingMaskIntoConstraints = false
 
         searchContainer.wantsLayer = true
@@ -466,6 +490,9 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
         let origin = NSPoint(x: frame.midX - metrics.panelWidth / 2,
                              y: frame.midY - height / 2)
         panel.setFrame(NSRect(x: origin.x, y: origin.y, width: metrics.panelWidth, height: height), display: true)
+        // The window shadow is cached from the previous opaque shape; without
+        // this it keeps the old (or square) outline after a resize.
+        panel.invalidateShadow()
     }
 
     private func screenWithMouse() -> NSScreen? {

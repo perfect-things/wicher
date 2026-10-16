@@ -5,3 +5,8 @@
 - when Zen is minimised/hidden - it shows up in the panel as "Zen", but in Contexts it shows the full title of the active tab (website's title).
 - there are also some small artifacts visible in the panel corners (see screenshot).
 - lastly - there seem to be a performance issue, where if wicher is not opened for a couple minutes, opening it takes noticeably longer than usual (like over a second). I need it to be instant!
+
+
+# Next steps
+Review the wicher app code, and make an md file with the analysis & findings for:
+- any improvements that can be made to the app's architecture, code quality, performance, and user experience.

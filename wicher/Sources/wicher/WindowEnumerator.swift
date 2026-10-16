@@ -7,21 +7,85 @@ struct Enumeration {
     let windows: [WindowInfo]
     let appsWithoutWindows: [WindowInfo]
     let currentSpaceWindowIDs: Set<CGWindowID>
+
+    static let empty = Enumeration(windows: [], appsWithoutWindows: [], currentSpaceWindowIDs: [])
 }
 
-/// On-screen window facts read from CGWindowList (numbers/pids/bounds only —
-/// no window *names*, so no Screen Recording permission is needed).
+/// Window facts read from CGWindowList — numbers/pids/layer/bounds only, never
+/// `kCGWindowName`, so no Screen Recording permission is needed.
+///
+/// The list is taken with `.optionAll`, which includes windows that are *not*
+/// on screen: minimized ones, windows of hidden apps, and windows living on
+/// other Spaces (including full-screen Spaces). `isOnscreen` then tells the
+/// current Space apart from the rest.
 private struct CGWindowFact {
     let id: CGWindowID
     let pid: pid_t
-    let order: Int        // front-to-back index within the current Space
+    let layer: Int
+    let isOnscreen: Bool
+    let order: Int
+    let size: CGSize
+    let alpha: Double
+
+    /// Could plausibly be a user-facing window.
+    ///
+    /// Every app owns a handful of layer-0 windows that are not: one 1728×33
+    /// strip per display (menu-bar backing), 64×64 icon caches, and assorted
+    /// off-screen scratch windows. The size floor rejects those; it is a
+    /// *necessary*, not sufficient, test — see `representativeWindow`.
+    var isPlausibleWindow: Bool {
+        layer == 0 && alpha > 0.01 && size.width >= 200 && size.height >= 120
+    }
+}
+
+/// Flat, thread-safe description of one running app, captured once per scan so
+/// the parallel AX workers never touch `NSRunningApplication`.
+private struct AppMeta {
+    let pid: pid_t
+    let bundleID: String?
+    let name: String
+    let icon: NSImage?
+    let isHidden: Bool
+    let isRegular: Bool
+}
+
+/// One window as the Accessibility API reported it.
+private struct ScannedWindow {
+    let element: AXUIElement
+    let title: String
+    let minimized: Bool
+    let wid: CGWindowID?
+}
+
+private struct AppScan {
+    let windows: [ScannedWindow]
+    /// AX answered with at least one standard window. False means AX gave us
+    /// nothing — either the app genuinely has no windows, or it was too slow /
+    /// too asleep to answer, which is why the CGWindowList fallback exists.
+    let answered: Bool
+}
+
+/// An unordered scan result. MRU ordering is applied at read time, not here,
+/// so a cached snapshot still reflects the newest recency stamps.
+private struct Snapshot {
+    let windows: [WindowInfo]
+    let appsWithoutWindows: [WindowInfo]
+    let currentSpaceWindowIDs: Set<CGWindowID>
+    let takenAt: Date
 }
 
 /// Discovers switchable windows via the Accessibility API and keeps a
 /// most-recently-used ordering — at window granularity where possible, falling
 /// back to application granularity.
+///
+/// Scanning is kept *off* the summon path: `start()` installs AX observers and
+/// a low-frequency refresh so a snapshot is almost always warm, and
+/// `enumerate()` serves that snapshot. The cold path (no usable snapshot) still
+/// scans synchronously, but queries every app in parallel rather than serially.
 final class WindowEnumerator {
     static let shared = WindowEnumerator()
+
+    // MARK: - MRU state (main thread only)
 
     /// Application pids, most-recently-active first.
     private var mruPIDs: [pid_t] = []
@@ -32,7 +96,89 @@ final class WindowEnumerator {
     private var windowStamps: [CGWindowID: Int] = [:]
     private var clock = 0
 
+    // MARK: - Snapshot + caches (lock-guarded, touched from the scan queue)
+
+    private let lock = NSLock()
+    private var snapshot: Snapshot?
+    /// Last known AX title per window. Survives an app going to sleep, so a
+    /// hidden/off-Space window keeps its real title instead of decaying to the
+    /// bare app name.
+    private var titleCache: [CGWindowID: String] = [:]
+    /// Display sizes, refreshed on the main thread — `NSScreen` is not safe to
+    /// read from the scan queue.
+    private var screenSizes: [CGSize] = []
+    /// Last known AX element per window, so a window we can currently only see
+    /// via CGWindowList can still be raised individually.
+    private var axCache: [CGWindowID: AXUIElement] = [:]
+    /// Last known minimized flag per window. CGWindowList cannot tell a
+    /// minimized window from a window on another Space, but AX told us the last
+    /// time it answered — and it answers at the moment of minimizing, because
+    /// `kAXWindowMiniaturized` triggers a refresh while the app is still awake.
+    private var minimizedCache: [CGWindowID: Bool] = [:]
+
+    // MARK: - Refresh machinery (main thread only)
+
+    private var observers: [pid_t: AXObserver] = [:]
+    private var refreshTimer: Timer?
+    private var pendingRefresh: DispatchWorkItem?
+    private var refreshRequestedAt: Date?
+    private var refreshInFlight = false
+    private var suspended = false
+    private var started = false
+
+    private let scanQueue = DispatchQueue(label: "co.wicher.scan", qos: .userInitiated)
+    private let workerQueue = DispatchQueue(label: "co.wicher.scan.workers",
+                                            qos: .userInitiated,
+                                            attributes: .concurrent)
+
+    /// How old a snapshot may be and still be served to a summon.
+    private let maxSnapshotAge: TimeInterval = 2.5
+    /// Safety-net refresh cadence. AX observers do most of the work; this
+    /// catches apps whose observers never attached and keeps the next summon
+    /// instant even after a long idle period.
+    private let refreshInterval: TimeInterval = 2.0
+    /// AX messaging timeout for background scans — generous, because nothing
+    /// is waiting on them.
+    private let backgroundTimeout: TimeInterval = 1.0
+    /// AX messaging timeout when a summon has to scan synchronously. Short, so
+    /// one wedged app cannot stall the HUD; the title/AX caches cover whatever
+    /// a timeout loses.
+    private let foregroundTimeout: TimeInterval = 0.2
+
+    private static let observedNotifications: [String] = [
+        kAXWindowCreatedNotification,
+        kAXUIElementDestroyedNotification,
+        kAXWindowMiniaturizedNotification,
+        kAXWindowDeminiaturizedNotification,
+        kAXTitleChangedNotification,
+        kAXFocusedWindowChangedNotification,
+        kAXMainWindowChangedNotification,
+        kAXApplicationHiddenNotification,
+        kAXApplicationShownNotification,
+    ]
+
     private init() {}
+
+    // MARK: - Lifecycle
+
+    /// Seed MRU, start watching the system, and warm the first snapshot.
+    func start() {
+        guard !started else { return }
+        started = true
+        seedMRU()
+        cacheScreenSizes()
+        observeWorkspace()
+        installObservers(for: NSWorkspace.shared.runningApplications)
+
+        let timer = Timer(timeInterval: refreshInterval, repeats: true) { [weak self] _ in
+            self?.refreshIfStale()
+        }
+        timer.tolerance = refreshInterval / 2
+        RunLoop.main.add(timer, forMode: .common)
+        refreshTimer = timer
+
+        scheduleRefresh(after: 0)
+    }
 
     // MARK: - MRU bookkeeping
 
@@ -41,6 +187,7 @@ final class WindowEnumerator {
         mruPIDs.insert(pid, at: 0)
         // Record the app's current frontmost window as the most-recent window.
         if let wid = frontmostWindowID(ofPID: pid) { stampWindow(wid) }
+        scheduleRefresh(after: 0.1)
     }
 
     /// Record that a specific window just became frontmost.
@@ -74,137 +221,28 @@ final class WindowEnumerator {
         }
     }
 
-    // MARK: - Enumeration
+    // MARK: - Enumeration (the summon path)
 
-    /// Enumerate current standard windows (plus app-only entries), ordered by
-    /// window recency, then application MRU.
+    /// Current switchable windows (plus app-only entries), ordered by window
+    /// recency, then application MRU.
+    ///
+    /// Serves the cached snapshot when one is fresh enough — that is what makes
+    /// a summon instant regardless of how long wicher sat idle.
     func enumerate() -> Enumeration {
-        let selfPID = ProcessInfo.processInfo.processIdentifier
-        let cgFacts = onScreenWindowFacts()
-        let currentSpace = Set(cgFacts.map { $0.id })
-        // All on-screen window numbers at *any* layer, used to tell a real
-        // (layer-0) window from a fullscreen system shim: a shim is on-screen
-        // but not in `currentSpace` (which is layer-0 only).
-        let onScreenAnyLayer = Set(onScreenWindowFactsAnyLayer().map { $0.id })
+        lock.lock()
+        let cached = snapshot
+        lock.unlock()
 
-        let apps = NSWorkspace.shared.runningApplications.filter {
-            $0.activationPolicy != .prohibited && !$0.isTerminated
+        if let cached, Date().timeIntervalSince(cached.takenAt) < maxSnapshotAge {
+            scheduleRefresh(after: 0)   // keep the next summon warm
+            return order(cached)
         }
+        return order(performScan(timeout: foregroundTimeout))
+    }
 
-        var windows: [WindowInfo] = []
-        var appsWithoutWindows: [WindowInfo] = []
-        // Apps for which AX returned at least one standard window. The
-        // CGWindowList fallback must only fire for apps AX missed *entirely*,
-        // otherwise a full-screen app (whose single AX window is already listed)
-        // would gain phantom extra rows from its system/background CGWindows.
-        var appsWithAXWindows = Set<pid_t>()
-        var appsWithWindows = Set<pid_t>()
-
-        for app in apps {
-            let pid = app.processIdentifier
-            let appName = app.localizedName ?? "Unknown"
-            let axApp = AXUIElementCreateApplication(pid)
-            // Don't let an unresponsive app stall enumeration, but allow enough
-            // time that minimized/off-Space windows still report reliably.
-            AXUIElementSetMessagingTimeout(axApp, 0.5)
-            var value: CFTypeRef?
-            let axWindows: [AXUIElement]
-            if AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &value) == .success,
-               let list = value as? [AXUIElement] {
-                axWindows = list
-            } else {
-                axWindows = []
-            }
-
-            for axWindow in axWindows {
-                if let subrole = copyString(axWindow, kAXSubroleAttribute),
-                   subrole != (kAXStandardWindowSubrole as String) {
-                    continue
-                }
-                let title = copyString(axWindow, kAXTitleAttribute) ?? ""
-                let minimized = copyBool(axWindow, kAXMinimizedAttribute) ?? false
-                if title.isEmpty && appName == "Unknown" { continue }
-                // Skip wicher's own chrome (the borderless HUD), but keep its
-                // real titled windows such as Preferences.
-                if pid == selfPID && title.isEmpty { continue }
-
-                let wid = AXPrivate.windowID(of: axWindow)
-                // Reject fullscreen system shims: an AX "standard" window whose
-                // CGWindowID is on-screen but *not* at layer 0 is one of the
-                // helper windows macOS creates for a fullscreen Space, not a
-                // real window. (A genuine window on another Space is not
-                // on-screen at all, so it is kept.)
-                if let wid, onScreenAnyLayer.contains(wid), !currentSpace.contains(wid) {
-                    continue
-                }
-                // If we cannot resolve a window id, assume current Space (don't
-                // wrongly exclude it when "Visible Spaces" is selected).
-                let onCurrentSpace = wid.map { currentSpace.contains($0) } ?? true
-
-                windows.append(WindowInfo(pid: pid,
-                                          bundleID: app.bundleIdentifier,
-                                          appName: appName,
-                                          appIcon: app.icon,
-                                          title: title,
-                                          axWindow: axWindow,
-                                          isMinimized: minimized,
-                                          isAppHidden: app.isHidden,
-                                          cgWindowID: wid,
-                                          onCurrentSpace: onCurrentSpace))
-                appsWithAXWindows.insert(pid)
-                appsWithWindows.insert(pid)
-            }
-        }
-
-        // Fallback for apps AX reported *no* windows for at all — typically a
-        // full-screen app living on another Space. Add exactly one representative
-        // window so the app is switchable and not misfiled as "no windows". We
-        // pick the frontmost layer-0 CGWindow the app owns. selfPID is allowed
-        // here too, so wicher's own Preferences window surfaces when it lives on
-        // another Space (AX only reports our windows on the active Space); the
-        // borderless HUD never appears because it is not a layer-0 CGWindow.
-        for app in apps {
-            let pid = app.processIdentifier
-            guard app.activationPolicy == .regular,
-                  !appsWithAXWindows.contains(pid),
-                  let fact = cgFacts.first(where: { $0.pid == pid })
-            else { continue }
-            let appName = app.localizedName ?? "Unknown"
-            if appName == "Unknown" { continue }
-            windows.append(WindowInfo(pid: pid,
-                                      bundleID: app.bundleIdentifier,
-                                      appName: appName,
-                                      appIcon: app.icon,
-                                      title: "",            // name needs Screen Recording; fall back to app name
-                                      axWindow: nil,
-                                      isMinimized: false,
-                                      isAppHidden: app.isHidden,
-                                      cgWindowID: fact.id,
-                                      onCurrentSpace: true)) // present in the on-screen list
-            appsWithWindows.insert(pid)
-        }
-
-        // "Apps without windows" lists only regular (Dock) apps that produced no
-        // real window at all — so background agents and off-Space apps that we
-        // *did* find windows for are never dumped here.
-        for app in apps {
-            let pid = app.processIdentifier
-            guard app.activationPolicy == .regular,
-                  pid != selfPID,
-                  !appsWithWindows.contains(pid) else { continue }
-            let appName = app.localizedName ?? "Unknown"
-            appsWithoutWindows.append(WindowInfo(pid: pid,
-                                                 bundleID: app.bundleIdentifier,
-                                                 appName: appName,
-                                                 appIcon: app.icon,
-                                                 title: appName,
-                                                 axWindow: AXUIElementCreateApplication(pid),
-                                                 isMinimized: false,
-                                                 isAppHidden: app.isHidden,
-                                                 isAppOnly: true))
-        }
-
-        let ordered = windows.enumerated().sorted { lhs, rhs in
+    /// Applies the current MRU ordering to a snapshot.
+    private func order(_ snap: Snapshot) -> Enumeration {
+        let ordered = snap.windows.enumerated().sorted { lhs, rhs in
             // 1) window recency (more-recent first), 2) app MRU, 3) stable order.
             let wa = windowRank(lhs.element.cgWindowID)
             let wb = windowRank(rhs.element.cgWindowID)
@@ -215,11 +253,10 @@ final class WindowEnumerator {
             return lhs.offset < rhs.offset
         }.map { $0.element }
 
-        let orderedApps = appsWithoutWindows.sorted { mruRank($0.pid) < mruRank($1.pid) }
-
+        let orderedApps = snap.appsWithoutWindows.sorted { mruRank($0.pid) < mruRank($1.pid) }
         return Enumeration(windows: ordered,
                            appsWithoutWindows: orderedApps,
-                           currentSpaceWindowIDs: currentSpace)
+                           currentSpaceWindowIDs: snap.currentSpaceWindowIDs)
     }
 
     private func mruRank(_ pid: pid_t) -> Int { mruPIDs.firstIndex(of: pid) ?? Int.max }
@@ -231,60 +268,501 @@ final class WindowEnumerator {
         return -stamp  // larger stamp → smaller (earlier) rank
     }
 
+    // MARK: - Refresh scheduling
+
+    /// Coalesced background refresh. Several callers (AX notifications, app
+    /// activation, the summon path) ask for one at once; only one scan runs.
+    private func scheduleRefresh(after delay: TimeInterval) {
+        guard started, !suspended else { return }
+        // A chatty app (title changes while you type) would otherwise push the
+        // pending refresh out forever. Once a request has waited this long, let
+        // it run instead of rescheduling it again.
+        if let first = refreshRequestedAt, Date().timeIntervalSince(first) > 0.5, pendingRefresh != nil {
+            return
+        }
+        if pendingRefresh == nil { refreshRequestedAt = Date() }
+        pendingRefresh?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.runRefresh() }
+        pendingRefresh = work
+        if delay <= 0 {
+            DispatchQueue.main.async(execute: work)
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        }
+    }
+
+    private func refreshIfStale() {
+        lock.lock()
+        let age = snapshot.map { Date().timeIntervalSince($0.takenAt) } ?? .greatestFiniteMagnitude
+        lock.unlock()
+        if age >= refreshInterval { scheduleRefresh(after: 0) }
+    }
+
+    private func runRefresh() {
+        pendingRefresh = nil
+        refreshRequestedAt = nil
+        guard !refreshInFlight, !suspended else { return }
+        refreshInFlight = true
+        scanQueue.async { [weak self] in
+            guard let self else { return }
+            _ = self.performScan(timeout: self.backgroundTimeout)
+            DispatchQueue.main.async { self.refreshInFlight = false }
+        }
+    }
+
+    // MARK: - Scanning
+
+    /// One full AX + CGWindowList pass. Stores the result as the new snapshot
+    /// and returns it. Safe to call from any thread.
+    @discardableResult
+    private func performScan(timeout: TimeInterval) -> Snapshot {
+        let selfPID = ProcessInfo.processInfo.processIdentifier
+        let facts = windowFacts()
+        var factByID: [CGWindowID: CGWindowFact] = [:]
+        for fact in facts where factByID[fact.id] == nil { factByID[fact.id] = fact }
+        let currentSpace = Set(facts.filter { $0.layer == 0 && $0.isOnscreen }.map(\.id))
+        let liveIDs = Set(facts.map(\.id))
+
+        let metas = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy != .prohibited && !$0.isTerminated }
+            .map {
+                AppMeta(pid: $0.processIdentifier,
+                        bundleID: $0.bundleIdentifier,
+                        name: $0.localizedName ?? "Unknown",
+                        icon: $0.icon,
+                        isHidden: $0.isHidden,
+                        isRegular: $0.activationPolicy == .regular)
+            }
+
+        let scans = scanApps(metas, timeout: timeout)
+
+        lock.lock()
+        var titles = titleCache
+        var elements = axCache
+        var minimizedStates = minimizedCache
+        lock.unlock()
+
+        var windows: [WindowInfo] = []
+        var emitted = Set<CGWindowID>()
+        var appsWithAXWindows = Set<pid_t>()
+        var appsWithWindows = Set<pid_t>()
+
+        for (index, meta) in metas.enumerated() {
+            guard let scan = scans[index], scan.answered else { continue }
+            for window in scan.windows {
+                // Reject full-screen system shims: an AX "standard" window whose
+                // CGWindowID is on screen but *not* at layer 0 is one of the
+                // helper windows macOS makes for a full-screen Space, not a real
+                // window. A genuine window on another Space is not on screen at
+                // all, so it survives this test.
+                if let wid = window.wid, let fact = factByID[wid], fact.isOnscreen, fact.layer != 0 {
+                    continue
+                }
+                if let wid = window.wid, emitted.contains(wid) { continue }
+
+                // Prefer the live title; fall back to the last one we saw for
+                // this window before the app went quiet.
+                var title = window.title
+                if title.isEmpty, let wid = window.wid, let cached = titles[wid] { title = cached }
+
+                // Skip wicher's own chrome (the borderless HUD), but keep its
+                // real titled windows such as Preferences.
+                if meta.pid == selfPID && title.isEmpty { continue }
+                if title.isEmpty && meta.name == "Unknown" { continue }
+
+                windows.append(WindowInfo(pid: meta.pid,
+                                          bundleID: meta.bundleID,
+                                          appName: meta.name,
+                                          appIcon: meta.icon,
+                                          title: title,
+                                          axWindow: window.element,
+                                          isMinimized: window.minimized,
+                                          isAppHidden: meta.isHidden,
+                                          cgWindowID: window.wid,
+                                          onCurrentSpace: spaceMembership(wid: window.wid,
+                                                                          minimized: window.minimized,
+                                                                          hidden: meta.isHidden,
+                                                                          currentSpace: currentSpace)))
+                appsWithAXWindows.insert(meta.pid)
+                appsWithWindows.insert(meta.pid)
+                if let wid = window.wid {
+                    emitted.insert(wid)
+                    elements[wid] = window.element
+                    minimizedStates[wid] = window.minimized
+                    if !window.title.isEmpty { titles[wid] = window.title }
+                }
+            }
+        }
+
+        // Fallback for apps AX reported no windows for — a full-screen app on
+        // another Space, a hidden app that declined to answer, or one that was
+        // asleep and timed out. CGWindowList with `.optionAll` still knows those
+        // windows exist, and the title/element caches usually still know what
+        // they are called and how to raise them.
+        lock.lock()
+        let screenSizes = self.screenSizes
+        lock.unlock()
+        for meta in metas where meta.isRegular && meta.name != "Unknown" && !appsWithAXWindows.contains(meta.pid) {
+            let candidates = facts.filter { $0.pid == meta.pid && $0.isPlausibleWindow && !emitted.contains($0.id) }
+            guard !candidates.isEmpty else { continue }
+
+            // High confidence: on screen now, or a window we have previously
+            // read a title from via AX. Those get a row each, with a real title
+            // and (from the element cache) individual raise.
+            let confident = candidates.filter { $0.isOnscreen || titles[$0.id] != nil }
+            let chosen = confident.isEmpty
+                ? [representativeWindow(among: candidates, screenSizes: screenSizes)].compactMap { $0 }
+                : confident
+
+            for fact in chosen {
+                let minimized = minimizedStates[fact.id] ?? false
+                windows.append(WindowInfo(pid: meta.pid,
+                                          bundleID: meta.bundleID,
+                                          appName: meta.name,
+                                          appIcon: meta.icon,
+                                          title: titles[fact.id] ?? "",
+                                          axWindow: elements[fact.id],
+                                          isMinimized: minimized,
+                                          isAppHidden: meta.isHidden,
+                                          cgWindowID: fact.id,
+                                          onCurrentSpace: spaceMembership(wid: fact.id,
+                                                                          minimized: minimized,
+                                                                          hidden: meta.isHidden,
+                                                                          currentSpace: currentSpace)))
+                emitted.insert(fact.id)
+                appsWithWindows.insert(meta.pid)
+            }
+        }
+
+        // "Apps without windows" now means exactly that: a Dock app for which
+        // neither AX nor CGWindowList found a single window. Full-screen,
+        // off-Space, hidden and minimized apps all produced rows above, so they
+        // can never land here.
+        var appsWithoutWindows: [WindowInfo] = []
+        for meta in metas where meta.isRegular && meta.pid != selfPID && !appsWithWindows.contains(meta.pid) {
+            appsWithoutWindows.append(WindowInfo(pid: meta.pid,
+                                                 bundleID: meta.bundleID,
+                                                 appName: meta.name,
+                                                 appIcon: meta.icon,
+                                                 title: meta.name,
+                                                 axWindow: AXUIElementCreateApplication(meta.pid),
+                                                 isMinimized: false,
+                                                 isAppHidden: meta.isHidden,
+                                                 isAppOnly: true))
+        }
+
+        let snap = Snapshot(windows: windows,
+                            appsWithoutWindows: appsWithoutWindows,
+                            currentSpaceWindowIDs: currentSpace,
+                            takenAt: Date())
+
+        lock.lock()
+        snapshot = snap
+        titleCache = titles.filter { liveIDs.contains($0.key) }
+        axCache = elements.filter { liveIDs.contains($0.key) }
+        minimizedCache = minimizedStates.filter { liveIDs.contains($0.key) }
+        lock.unlock()
+
+        return snap
+    }
+
+    /// Pick a single stand-in row for an app we can see only through
+    /// CGWindowList and have never read a title from.
+    ///
+    /// Emitting every plausible window here would invent rows: an app with no
+    /// AX answer still owns off-screen scratch windows that pass a size test.
+    /// One row is enough to make the app reachable — activating it performs the
+    /// Dock-click reopen, which is also what brings a full-screen Space forward.
+    /// A display-sized window is the signature of exactly that case, so it wins;
+    /// otherwise take the largest.
+    private func representativeWindow(among candidates: [CGWindowFact],
+                                      screenSizes: [CGSize]) -> CGWindowFact? {
+        func isDisplaySized(_ fact: CGWindowFact) -> Bool {
+            screenSizes.contains { abs($0.width - fact.size.width) < 2 && abs($0.height - fact.size.height) < 60 }
+        }
+        if let fullScreen = candidates.first(where: isDisplaySized) { return fullScreen }
+        return candidates.max { $0.size.width * $0.size.height < $1.size.width * $1.size.height }
+    }
+
+    /// A minimized window, or one belonging to a hidden app, is not on screen
+    /// anywhere — but it is not "on another Space" either, and treating it as
+    /// such makes it vanish under the "Visible Spaces" filter. Count it as
+    /// current, which is what a user expects and what Contexts shows.
+    private func spaceMembership(wid: CGWindowID?,
+                                 minimized: Bool,
+                                 hidden: Bool,
+                                 currentSpace: Set<CGWindowID>) -> Bool {
+        if minimized || hidden { return true }
+        guard let wid else { return true }   // unknown id: never exclude
+        return currentSpace.contains(wid)
+    }
+
+    /// Query every app's AX window list in parallel. Serially this is the
+    /// dominant cost of a summon: each app is an IPC round trip, and an app
+    /// that has been idle (App Nap) can take hundreds of milliseconds to answer.
+    private func scanApps(_ metas: [AppMeta], timeout: TimeInterval) -> [Int: AppScan] {
+        guard !metas.isEmpty else { return [:] }
+        var results: [Int: AppScan] = [:]
+        let resultLock = NSLock()
+        let group = DispatchGroup()
+        let gate = DispatchSemaphore(value: 16)
+
+        for (index, meta) in metas.enumerated() {
+            gate.wait()
+            workerQueue.async(group: group) {
+                let scan = Self.scanApp(pid: meta.pid, timeout: timeout)
+                resultLock.lock()
+                results[index] = scan
+                resultLock.unlock()
+                gate.signal()
+            }
+        }
+        group.wait()
+        return results
+    }
+
+    private static func scanApp(pid: pid_t, timeout: TimeInterval) -> AppScan {
+        let axApp = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(axApp, Float(timeout))
+
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &value) == .success,
+              let list = value as? [AXUIElement], !list.isEmpty
+        else { return AppScan(windows: [], answered: false) }
+
+        var windows: [ScannedWindow] = []
+        for element in list {
+            let attrs = attributes(of: element)
+            // Only standard windows; sheets, drawers and popovers are not
+            // switch targets. A missing subrole is treated as standard.
+            if let subrole = attrs.subrole, subrole != (kAXStandardWindowSubrole as String) { continue }
+            windows.append(ScannedWindow(element: element,
+                                         title: attrs.title ?? "",
+                                         minimized: attrs.minimized ?? false,
+                                         wid: AXPrivate.windowID(of: element)))
+        }
+        return AppScan(windows: windows, answered: !windows.isEmpty)
+    }
+
+    /// Subrole, title and minimized state in a *single* AX round trip rather
+    /// than three. Cuts per-window IPC by two thirds, which is the second
+    /// biggest term in scan latency after per-app parallelism.
+    private static func attributes(of element: AXUIElement)
+        -> (subrole: String?, title: String?, minimized: Bool?) {
+        let names = [kAXSubroleAttribute, kAXTitleAttribute, kAXMinimizedAttribute] as CFArray
+        var values: CFArray?
+        guard AXUIElementCopyMultipleAttributeValues(element,
+                                                     names,
+                                                     AXCopyMultipleAttributeOptions(rawValue: 0),
+                                                     &values) == .success,
+              let array = values as? [AnyObject], array.count == 3
+        else { return (nil, nil, nil) }
+        // Attributes the element does not support come back as an AXValue error
+        // placeholder, which simply fails the casts below.
+        return (array[0] as? String, array[1] as? String, array[2] as? Bool)
+    }
+
     // MARK: - CGWindowList
 
-    /// On-screen windows (current Space), front-to-back, with id + owner pid.
-    /// Reading numbers/pids/layer/bounds does NOT require Screen Recording.
-    private func onScreenWindowFacts() -> [CGWindowFact] {
-        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+    /// Every window in the session — on screen or not — with id, owner, layer
+    /// and size. Reading those does NOT require Screen Recording; only
+    /// `kCGWindowName` would.
+    private func windowFacts() -> [CGWindowFact] {
+        let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
         guard let infos = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
             return []
         }
         var facts: [CGWindowFact] = []
+        facts.reserveCapacity(infos.count)
         for (index, info) in infos.enumerated() {
             guard let number = info[kCGWindowNumber as String] as? CGWindowID,
                   let owner = info[kCGWindowOwnerPID as String] as? pid_t,
-                  // Normal window layer only (0) — skip menus, the Dock, etc.
-                  let layer = info[kCGWindowLayer as String] as? Int, layer == 0
+                  let layer = info[kCGWindowLayer as String] as? Int
             else { continue }
-            facts.append(CGWindowFact(id: number, pid: owner, order: index))
+            var size = CGSize.zero
+            if let bounds = info[kCGWindowBounds as String] as? NSDictionary,
+               let rect = CGRect(dictionaryRepresentation: bounds) {
+                size = rect.size
+            }
+            facts.append(CGWindowFact(id: number,
+                                      pid: owner,
+                                      layer: layer,
+                                      isOnscreen: (info[kCGWindowIsOnscreen as String] as? Bool) ?? false,
+                                      order: index,
+                                      size: size,
+                                      alpha: (info[kCGWindowAlpha as String] as? Double) ?? 1))
         }
         return facts
     }
 
-    /// On-screen windows at *any* layer (used to detect fullscreen shims, which
-    /// are on-screen but not at layer 0).
-    private func onScreenWindowFactsAnyLayer() -> [CGWindowFact] {
+    /// The frontmost normal window id owned by `pid`, if any is on screen.
+    private func frontmostWindowID(ofPID pid: pid_t) -> CGWindowID? {
         let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
         guard let infos = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
-            return []
+            return nil
         }
-        var facts: [CGWindowFact] = []
-        for (index, info) in infos.enumerated() {
+        for info in infos {
             guard let number = info[kCGWindowNumber as String] as? CGWindowID,
-                  let owner = info[kCGWindowOwnerPID as String] as? pid_t
+                  let owner = info[kCGWindowOwnerPID as String] as? pid_t, owner == pid,
+                  let layer = info[kCGWindowLayer as String] as? Int, layer == 0
             else { continue }
-            facts.append(CGWindowFact(id: number, pid: owner, order: index))
+            return number
         }
-        return facts
+        return nil
     }
 
-    /// The frontmost normal window id owned by `pid`, if any is on-screen.
-    private func frontmostWindowID(ofPID pid: pid_t) -> CGWindowID? {
-        onScreenWindowFacts().first { $0.pid == pid }?.id
+    // MARK: - Diagnostics
+
+    /// A human-readable dump of what AX and CGWindowList each report, per app.
+    ///
+    /// Window enumeration on macOS is mostly undocumented behavior, and the
+    /// interesting cases (a hidden app, a full-screen app on another Space) are
+    /// exactly the ones that cannot be reproduced from a shell. This is how to
+    /// see the ground truth on a real machine: menu bar → Copy Diagnostics.
+    func diagnosticsReport() -> String {
+        var out = ""
+        out += "wicher diagnostics — \(Date())\n"
+        out += "AXIsProcessTrusted: \(AXIsProcessTrusted())\n"
+        out += "_AXUIElementGetWindow available: \(AXPrivate.isAvailable)\n"
+
+        let facts = windowFacts()
+        var byPID: [pid_t: [CGWindowFact]] = [:]
+        for fact in facts { byPID[fact.pid, default: []].append(fact) }
+        out += "CGWindowList(.optionAll) entries: \(facts.count), onscreen: \(facts.filter(\.isOnscreen).count)\n"
+
+        lock.lock()
+        let age = snapshot.map { Date().timeIntervalSince($0.takenAt) }
+        let cachedTitles = titleCache.count
+        lock.unlock()
+        out += "snapshot age: \(age.map { String(format: "%.2fs", $0) } ?? "none"), cached titles: \(cachedTitles)\n\n"
+
+        let apps = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && !$0.isTerminated }
+        for app in apps {
+            let pid = app.processIdentifier
+            let started = Date()
+            let scan = Self.scanApp(pid: pid, timeout: backgroundTimeout)
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            out += "── \(app.localizedName ?? "?") pid=\(pid) hidden=\(app.isHidden) "
+            out += "axWindows=\(scan.windows.count) answered=\(scan.answered) [\(ms)ms]\n"
+            for window in scan.windows {
+                let fact = window.wid.flatMap { wid in facts.first { $0.id == wid } }
+                out += "    AX wid=\(window.wid.map(String.init) ?? "-") min=\(window.minimized) "
+                out += "layer=\(fact.map { String($0.layer) } ?? "-") on=\(fact.map { String($0.isOnscreen) } ?? "-") "
+                out += "size=\(fact.map { "\(Int($0.size.width))x\(Int($0.size.height))" } ?? "-") "
+                out += "title=\"\(window.title)\"\n"
+            }
+            let axIDs = Set(scan.windows.compactMap(\.wid))
+            for fact in (byPID[pid] ?? []) where fact.layer == 0 && !axIDs.contains(fact.id) {
+                out += "    CG-only wid=\(fact.id) on=\(fact.isOnscreen) "
+                out += "size=\(Int(fact.size.width))x\(Int(fact.size.height)) alpha=\(fact.alpha) "
+                out += "plausible=\(fact.isPlausibleWindow)\n"
+            }
+        }
+        return out
     }
 
-    // MARK: - AX attribute helpers
+    // MARK: - Watching the system
 
-    private func copyString(_ element: AXUIElement, _ attribute: String) -> String? {
-        var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &ref) == .success else { return nil }
-        return ref as? String
+    private func cacheScreenSizes() {
+        let sizes = NSScreen.screens.map(\.frame.size)
+        lock.lock()
+        screenSizes = sizes
+        lock.unlock()
     }
 
-    private func copyBool(_ element: AXUIElement, _ attribute: String) -> Bool? {
-        var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &ref) == .success else { return nil }
-        return ref as? Bool
+    private func observeWorkspace() {
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main) { [weak self] _ in
+            self?.cacheScreenSizes()
+            self?.scheduleRefresh(after: 0.1)
+        }
+        let center = NSWorkspace.shared.notificationCenter
+        let refreshing: [NSNotification.Name] = [
+            NSWorkspace.didHideApplicationNotification,
+            NSWorkspace.didUnhideApplicationNotification,
+            NSWorkspace.activeSpaceDidChangeNotification,
+        ]
+        for name in refreshing {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.scheduleRefresh(after: 0.1)
+            }
+        }
+        center.addObserver(forName: NSWorkspace.didLaunchApplicationNotification,
+                           object: nil, queue: .main) { [weak self] note in
+            if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
+                self?.installObservers(for: [app])
+            }
+            self?.scheduleRefresh(after: 0.3)
+        }
+        center.addObserver(forName: NSWorkspace.didTerminateApplicationNotification,
+                           object: nil, queue: .main) { [weak self] note in
+            if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
+                self?.removeObserver(pid: app.processIdentifier)
+            }
+            self?.scheduleRefresh(after: 0.1)
+        }
+        // Don't poke every app while the display is asleep.
+        center.addObserver(forName: NSWorkspace.screensDidSleepNotification,
+                           object: nil, queue: .main) { [weak self] _ in
+            self?.suspended = true
+        }
+        center.addObserver(forName: NSWorkspace.screensDidWakeNotification,
+                           object: nil, queue: .main) { [weak self] _ in
+            self?.suspended = false
+            self?.scheduleRefresh(after: 0)
+        }
+    }
+
+    // MARK: - AX observers
+
+    private static let observerCallback: AXObserverCallback = { _, _, _, refcon in
+        guard let refcon else { return }
+        let enumerator = Unmanaged<WindowEnumerator>.fromOpaque(refcon).takeUnretainedValue()
+        enumerator.scheduleRefresh(after: 0.15)
+    }
+
+    private func installObservers(for apps: [NSRunningApplication]) {
+        let selfPID = ProcessInfo.processInfo.processIdentifier
+        let pids = apps
+            .filter { $0.activationPolicy != .prohibited && !$0.isTerminated && $0.processIdentifier != selfPID }
+            .map(\.processIdentifier)
+            .filter { observers[$0] == nil }
+        guard !pids.isEmpty else { return }
+
+        // Attaching to a sleeping app can block, so do it off the main thread.
+        scanQueue.async { [weak self] in
+            guard let self else { return }
+            let refcon = Unmanaged.passUnretained(self).toOpaque()
+            for pid in pids {
+                var observer: AXObserver?
+                guard AXObserverCreate(pid, Self.observerCallback, &observer) == .success,
+                      let observer else { continue }
+                let axApp = AXUIElementCreateApplication(pid)
+                AXUIElementSetMessagingTimeout(axApp, Float(self.backgroundTimeout))
+                var attached = false
+                for name in Self.observedNotifications {
+                    if AXObserverAddNotification(observer, axApp, name as CFString, refcon) == .success {
+                        attached = true
+                    }
+                }
+                guard attached else { continue }
+                DispatchQueue.main.async {
+                    guard self.observers[pid] == nil else { return }
+                    self.observers[pid] = observer
+                    CFRunLoopAddSource(CFRunLoopGetMain(),
+                                       AXObserverGetRunLoopSource(observer),
+                                       .defaultMode)
+                }
+            }
+        }
+    }
+
+    private func removeObserver(pid: pid_t) {
+        guard let observer = observers.removeValue(forKey: pid) else { return }
+        CFRunLoopRemoveSource(CFRunLoopGetMain(),
+                              AXObserverGetRunLoopSource(observer),
+                              .defaultMode)
     }
 }
