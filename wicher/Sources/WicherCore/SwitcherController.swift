@@ -16,6 +16,9 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     private var session: SwitcherSession?
     private var panelShown = false
     private var pendingShow: DispatchWorkItem?
+    /// The screen the session opened on. Fixed for the session, so a live
+    /// refresh resizes the panel in place instead of chasing the mouse.
+    private var sessionScreen: NSScreen?
     private var metrics = HUDMetrics.make(iconSize: 32, textSize: 16, rowPadding: 7)
 
     private var localMonitor: Any?
@@ -89,6 +92,7 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
         metrics = HUDMetrics.make(iconSize: Settings.shared.iconSize,
                                   textSize: Settings.shared.textSize,
                                   rowPadding: Settings.shared.rowPadding)
+        sessionScreen = screenWithMouse() ?? NSScreen.main
         let activeAppPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         // Make sure the window currently in front is the most-recent one, so a
         // quick tap selects the genuine previous window (see SwitcherSession.init).
@@ -136,6 +140,7 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
         if panelShown { panel.orderOut(nil) }
         listView.clear()
         session = nil
+        sessionScreen = nil
         panelShown = false
     }
 
@@ -275,8 +280,7 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
         guard let session else { return }
         listView.render(session.rows, metrics: metrics)
 
-        let screen = screenWithMouse() ?? NSScreen.main
-        let frame = screen?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let frame = sessionScreen?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let height = listView.preferredHeight(maxListHeight: frame.height * 0.7)
         let origin = NSPoint(x: frame.midX - metrics.panelWidth / 2,
                              y: frame.midY - height / 2)

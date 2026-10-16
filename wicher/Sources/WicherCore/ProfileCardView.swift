@@ -2,6 +2,8 @@ import AppKit
 import Carbon.HIToolbox
 
 protocol ProfileCardDelegate: AnyObject {
+    /// Why `combo` cannot be this card's shortcut, or nil to accept it.
+    func card(_ id: UUID, problemWithShortcut combo: HotKeyCombo) -> String?
     func card(_ id: UUID, didSetShortcut combo: HotKeyCombo)
     func card(_ id: UUID, didSetScope scope: WindowScope)
     func card(_ id: UUID, didSetSpaces spaces: SpaceScope)
@@ -122,9 +124,8 @@ final class ProfileCardView: NSView {
         if event.modifierFlags.contains(.shift) { mods |= UInt32(shiftKey) }
         if event.modifierFlags.contains(.control) { mods |= UInt32(controlKey) }
         let combo = HotKeyCombo(keyCode: UInt32(event.keyCode), carbonModifiers: mods)
-        // Shift is reserved for cycling backwards (see `HotKeyCombo.reverse`).
-        guard !combo.containsShift else {
-            shortcutButton.title = "⇧ is reserved for reverse"
+        if let problem = delegate?.card(profileID, problemWithShortcut: combo) {
+            shortcutButton.title = problem
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 guard let self, self.recordingMonitor == nil else { return }
                 self.shortcutButton.title = self.currentCombo.displayString

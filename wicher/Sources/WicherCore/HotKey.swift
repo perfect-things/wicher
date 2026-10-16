@@ -30,6 +30,21 @@ struct HotKeyCombo: Equatable {
     /// combo that already contains Shift would collide with its own reverse.
     var containsShift: Bool { carbonModifiers & UInt32(shiftKey) != 0 }
 
+    /// Why `self` cannot be used as a switcher shortcut, or nil if it can.
+    ///
+    /// - Shift is reserved for reverse cycling (see `reverse`).
+    /// - Without ⌘, ⌥ or ⌃ the hot key would swallow that key system-wide, and
+    ///   there would be no modifier to release to commit a switch.
+    /// - A chord another switcher already uses (as its shortcut or its
+    ///   reverse) cannot be registered twice.
+    func problem(amongOthers others: [HotKeyCombo]) -> String? {
+        if containsShift { return "⇧ is reserved for reverse" }
+        if eventModifierFlags.isDisjoint(with: [.command, .option, .control]) { return "Add ⌘, ⌥ or ⌃" }
+        let taken = others.flatMap { [$0] + ($0.reverse.map { [$0] } ?? []) }
+        if taken.contains(self) || reverse.map(taken.contains) == true { return "Used by another switcher" }
+        return nil
+    }
+
     /// The reverse-cycling combo: this one plus Shift. Nil when the combo
     /// already holds Shift, since the two would be the same key chord.
     var reverse: HotKeyCombo? {

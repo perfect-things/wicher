@@ -229,6 +229,9 @@ final class PreferencesWindow: NSObject, ProfileCardDelegate {
 
     // MARK: - ProfileCardDelegate
 
+    func card(_ id: UUID, problemWithShortcut combo: HotKeyCombo) -> String? {
+        combo.problem(amongOthers: profiles.filter { $0.id != id }.map(\.combo))
+    }
     func card(_ id: UUID, didSetShortcut combo: HotKeyCombo) { mutate(id) { $0.combo = combo } }
     func card(_ id: UUID, didSetScope scope: WindowScope) { mutate(id) { $0.scope = scope } }
     func card(_ id: UUID, didSetSpaces spaces: SpaceScope) { mutate(id) { $0.spaces = spaces } }
