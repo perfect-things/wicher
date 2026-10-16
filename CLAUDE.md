@@ -34,11 +34,15 @@ hot keys and the HUD need the assembled `.app`.
 
 The package is split so the code is testable: `Sources/WicherCore` (library, all the
 code) and `Sources/wicher` (executable: just `main.swift` → `WicherApp.run()`). Tests
-in `Tests/WicherCoreTests` use `@testable import WicherCore` and cover only the pure
-pieces — `WindowGrouping`, `FuzzyMatcher`, `HUDMetrics`, `SwitcherSession` — with
-hand-built `WindowInfo`/`Enumeration` fixtures (`axWindow: nil`). Enumeration, AX,
-hot keys and the HUD itself have no tests; verify those by building the app, granting
-Accessibility, and exercising ⌥Tab.
+in `Tests/WicherCoreTests` use `@testable import WicherCore` and cover the pure pieces —
+`WindowAssembly` (the scan → rows classification), `WindowGrouping`, `FuzzyMatcher`,
+`HUDMetrics`, `SwitcherSession` (incl. live updates), `HotKeyCombo`, `Settings` (via
+`Settings(defaults:)` on a test suite) — plus `SwitcherListView` layout rendered
+offscreen. Fixtures are hand-built (`axWindow: nil`; `AXUIElementCreateApplication` is
+fine where an element is required — it does no IPC). The AX/CGWindowList *collection*,
+hot keys, activation and the live HUD have no tests; verify those by building the app,
+granting Accessibility, and exercising ⌥Tab. Set `WICHER_SNAPSHOT_DIR` when running
+`swift test` to get a PNG of the list layout.
 
 Signing: `build.sh` signs with the "Wicher Development" identity (override with
 `WICHER_SIGN_IDENTITY`) when it exists, else ad-hoc. Create it once with
@@ -64,26 +68,38 @@ database. Flow of one switch:
    - **`SwitcherSession`** — value-type model of one session: rows for the current query
      (grouped, or fuzzy-scored when searching) and the selection. No views or timers.
    - **`SwitcherListView`** — the panel's content view: backdrop, search bar, rows,
-     selection highlight, preferred height.
-4. **`WindowEnumerator`** (singleton) — AX + CGWindowList discovery, a background
-   snapshot kept fresh by AX observers, title/element caches, MRU bookkeeping, and the
-   menu-bar **Copy Diagnostics** dump (`diagnosticsReport()`).
+     selection highlight, preferred height. Row/header views are **pooled and placed by
+     frame** (heights come from `HUDMetrics`); don't reintroduce per-render view
+     creation or Auto Layout in rows.
+   While the panel is shown it observes `WindowEnumerator.didRefresh` and calls
+   `SwitcherSession.update(enumeration:)`, which keeps the selection by `WindowInfo.key`.
+   Never before the panel is shown — a quick tap must commit the preselected window.
+4. **`WindowEnumerator`** (singleton) — *collects* AX + CGWindowList input, keeps a
+   background snapshot fresh via AX observers, owns the caches and MRU, and produces the
+   menu-bar **Copy Diagnostics** dump (`diagnosticsReport()`). The decision of which rows
+   exist is **`WindowAssembly.assemble`** — pure, tested; put classification changes
+   there, with a test.
 5. **`WindowGrouping`** — pure function: `(profile, Enumeration, activePID) → [WindowSection]`.
    Put filtering/ordering policy here, not in the controller; it is the one piece that is
    trivially reasonable about in isolation.
-6. **`WindowActivator`** — un-minimize, raise, activate; or a Dock-click-equivalent
-   reopen for app-only entries.
+6. **`WindowActivator`** — activate, then raise; a minimized window is un-minimized by
+   `DeminiaturizeWaiter`, which raises on `kAXWindowDeminiaturizedNotification` (0.6 s
+   timeout). App-only entries get a Dock-click-equivalent reopen.
 
 Config: `Settings` (UserDefaults; globals) + `SwitcherProfile` (Codable, JSON-encoded
-into UserDefaults; per-switcher scope/Spaces/placement + shortcut). Changing profiles
-must call `PreferencesWindow.onProfilesChanged` so hot keys re-register.
+into UserDefaults, decoded once and cached; per-switcher scope/Spaces/placement +
+shortcut). Every setter posts `Settings.didChange` with a `Settings.Change`;
+`AppController` re-registers hot keys on `.profiles` and applies `.appearance`. Shift is
+reserved for reverse cycling: the recorder rejects it and `HotKeyCombo.reverse` is nil
+for a combo that has it.
 `HUDMetrics.make(iconSize:textSize:rowPadding:)` derives every pixel dimension — don't
 hardcode row heights or panel widths elsewhere.
 
 ## Invariants worth knowing before changing enumeration
 
-`WindowEnumerator` is where most of the subtlety lives (~1000 lines, untested). Read
-`analysis/code-review.md` §1 before touching it.
+Enumeration is where most of the subtlety lives. Read `analysis/code-review.md` §1
+before touching it. Classification lives in `WindowAssembly` (tested); collection,
+caching, `reconcile` and observers in `WindowEnumerator` (not tested).
 
 **Summon path.** `enumerate()` serves the cached snapshot if it is < `maxSnapshotAge`
 (2.5 s) old, after `reconcile()` patches it cheaply: CGWindowList (which windows still
@@ -96,8 +112,9 @@ sleep); a refresh requested during a scan re-runs afterwards rather than being d
 - **Titles come from AX (`kAXTitleAttribute`), never `kCGWindowName`.** That is the whole
   reason the app needs only Accessibility and not Screen Recording. Reaching for
   `kCGWindowName` to fix a missing title would silently add a second permission
-  requirement — don't, without flagging it. Missing titles are covered by `titleCache`
-  (plus `axCache`, `minimizedCache`), keyed by `CGWindowID` and pruned to live windows.
+  requirement — don't, without flagging it. Missing titles are covered by
+  `WindowCaches` (titles, AX elements, minimized flags), keyed by `CGWindowID` and pruned
+  to live windows on every scan.
 - `CGWindowList` is taken with **`.optionAll`** and used for window *ids, pids, layer,
   bounds and on-screen state only*. `.optionAll` is noisy (menu-bar strips, icon caches,
   off-screen Chromium scratch windows), hence `CGWindowFact.isPlausibleWindow`.
@@ -128,6 +145,9 @@ sleep); a refresh requested during a scan re-runs afterwards rather than being d
   summon path — App Nap makes cold serial AX cost ~1 s.
 - Ordering is applied at read time in `order(_:)`: per-window recency stamp → app MRU →
   stable enumeration order, so a cached snapshot still reflects fresh MRU.
+- AX observers: app-level notifications per app; `kAXUIElementDestroyedNotification` is
+  registered **per window** (on an app element it means the app died) — existing windows
+  at install, new ones from the `kAXWindowCreated` callback.
 - Smoke test after any change here: launch the built bundle and confirm the process is
   still alive several seconds later (past the first background refresh).
 

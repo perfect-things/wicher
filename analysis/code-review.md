@@ -1,5 +1,10 @@
 # wicher — code review: architecture, quality, performance, UX
 
+> **Status (2026-10-16).** Everything in §2–§4 and §6 has been addressed, plus the §5
+> selected-row contrast and signing items; see the git log. Remaining open: the rest of
+> §5 (VoiceOver, empty state, searching app-only entries, close/quit from the panel,
+> diagnostics feedback) and localization (§3.3). Line references below are historical.
+
 Review of `wicher/Sources/wicher` at the point where the `tasks.md` issue list was
 addressed. Line references are to the tree *after* those fixes landed.
 
@@ -244,8 +249,7 @@ where every reported bug lived, that split is worth the effort.
 
 ### 3.2 Specific defects
 
-> **Status (2026-10-16):** all fixed except the deminiaturize retry, which still uses
-> the 0.05 s re-check. Shift in a combo is now rejected by the recorder
+> **Status (2026-10-16):** all fixed; the deminiaturize retry is now `DeminiaturizeWaiter`. Shift in a combo is now rejected by the recorder
 > (`HotKeyCombo.reverse` is nil for such combos, and `RegisterEventHotKey` failures are
 > logged); `FuzzyMatcher` compares lowercased `String`s and builds UTF-16 ranges in the
 > match pass; rows use `.inVisibleRect`, `applySelectionAppearance()`,
@@ -346,9 +350,8 @@ Beyond the enumeration work in §1.3:
 
 1. ~~Test target~~ (done) covering `WindowGrouping`, `FuzzyMatcher`, `HUDMetrics` — everything
    below is safer with it in place.
-2. Split `performScan` into a pure assembly function and test the §1.1 classification
-   table directly.
-3. Row-view reuse in `rebuildRows`.
-4. ~~The defect list in §3.2~~ — done, bar the deminiaturize observer.
-5. Stable signing identity in `build.sh`.
+2. ~~Split `performScan`~~ — done: `WindowAssembly`, `WindowAssemblyTests`.
+3. ~~Row-view reuse~~ — done: pooled, frame-placed rows in `SwitcherListView`.
+4. ~~The defect list in §3.2~~ — done, including the deminiaturize observer.
+5. ~~Stable signing identity~~ — done: `scripts/make-signing-identity.sh`.
 6. ~~`SwitcherController` split (§2.2)~~ — done.

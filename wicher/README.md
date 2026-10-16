@@ -67,35 +67,42 @@ signed**, so macOS re-asks for Accessibility access after each rebuild. Run
 - **Space filtering** ("visible Spaces") correlates each AX window with its
   `CGWindowID` via the private `_AXUIElementGetWindow`. If that symbol is ever
   unavailable the filter degrades safely (every window is treated as current).
-- MRU ordering is tracked at **application** granularity (per-window MRU across
-  enumerations is not attempted in this version).
+- MRU ordering is per window for windows wicher has seen come to the front,
+  falling back to application order for the rest.
 - Hot keys use a non-conflicting default (⌥Tab); wicher does **not** intercept
   the system ⌘-Tab (that would need an always-on event tap).
 - Reverse cycling for a profile is its shortcut **plus Shift** (not separately
-  editable).
+  editable), so a shortcut cannot itself contain Shift.
 
 ## Layout
 
 ```
-Package.swift            SwiftPM executable, macOS 13+
+Package.swift            SwiftPM: WicherCore library, wicher executable, tests; macOS 13+
 Info.plist               LSUIElement agent-app bundle metadata
-build.sh                 compile + assemble Wicher.app + ad-hoc sign
-Sources/wicher/
-  main.swift             NSApplication entry (.accessory)
-  AppController.swift     menu bar, hot keys (per profile), MRU, permission
-  Settings.swift          UserDefaults-backed global settings + profiles (JSON)
+build.sh                 compile + assemble Wicher.app + sign (stable identity or ad-hoc)
+scripts/make-signing-identity.sh  one-time local self-signed signing identity
+Sources/wicher/main.swift          entry point → WicherApp.run()
+Sources/WicherCore/                everything else (a library, so it is testable)
+  WicherApp.swift         NSApplication setup (.accessory)
+  AppController.swift     menu bar, main menu, hot keys (per profile), MRU, AX trust
+  Settings.swift          UserDefaults-backed settings + profiles; posts didChange
   SwitcherProfile.swift   per-switcher config: shortcut + scope/space/placement
   AppearanceManager.swift AppearanceMode + Light/Dark/System → NSApp.appearance
-  HUDMetrics.swift        HUDSize (Small/Medium/Large) → pixel metrics
+  HUDMetrics.swift        icon/text/padding sliders → every pixel dimension
   HotKey.swift            Carbon RegisterEventHotKey wrapper + key-code names
   AXPrivate.swift         _AXUIElementGetWindow (Space correlation, with fallback)
-  WindowInfo.swift        window / app-only model
-  WindowEnumerator.swift  AX discovery, flags, Space membership, MRU
+  WindowInfo.swift        window / app-only model + stable WindowKey
+  WindowEnumerator.swift  AX + CGWindowList collection, snapshot, observers, MRU
+  WindowAssembly.swift    scan inputs → rows (pure)
   WindowGrouping.swift    scope/space/placement → ordered sections (pure)
-  WindowActivator.swift   un-minimize + raise + activate
+  WindowActivator.swift   activate + raise; un-minimize via DeminiaturizeWaiter
   FuzzyMatcher.swift      subsequence match + scoring + highlight ranges
+  SwitcherSession.swift   one session: rows for the query + selection (pure)
+  SwitcherController.swift session lifecycle, delay, monitors, hold-repeat, commit
+  SwitcherListView.swift  backdrop, search bar, pooled frame-placed rows
+  SwitcherRowView.swift   row + section header views
   SwitcherPanel.swift     non-activating HUD panel
-  SwitcherRowView.swift   two-column row + section header view
-  SwitcherController.swift session/delay/grouping/search/commit orchestration
   PreferencesWindow.swift General + Appearance + Switchers settings
+  ProfileCardView.swift   one switcher's card + shortcut recorder
+Tests/WicherCoreTests/    unit tests (swift test)
 ```
