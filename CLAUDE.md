@@ -76,7 +76,7 @@ database. Flow of one switch:
    Never before the panel is shown — a quick tap must commit the preselected window.
 4. **`WindowEnumerator`** (singleton) — *collects* AX + CGWindowList input, keeps a
    background snapshot fresh via AX observers, owns the caches and MRU, and produces the
-   menu-bar **Copy Diagnostics** dump (`diagnosticsReport()`). The decision of which rows
+   **Copy Diagnostics** dump (`diagnosticsReport()`, Preferences → General). The decision of which rows
    exist is **`WindowAssembly.assemble`** — pure, tested; put classification changes
    there, with a test.
 5. **`WindowGrouping`** — pure function: `(profile, Enumeration, activePID) → [WindowSection]`.

@@ -18,6 +18,8 @@ final class PreferencesWindow: NSObject, ProfileCardDelegate {
     private lazy var iconLabel = NSTextField(labelWithString: "")
     private lazy var textLabel = NSTextField(labelWithString: "")
     private lazy var paddingLabel = NSTextField(labelWithString: "")
+    private lazy var diagnosticsButton = NSButton(title: "Copy Diagnostics",
+                                                  target: self, action: #selector(copyDiagnostics(_:)))
 
     func show() {
         if window == nil { build() }
@@ -79,12 +81,26 @@ final class PreferencesWindow: NSObject, ProfileCardDelegate {
         stack.addArrangedSubview(labeledRow("Show panel after:", row))
 
         stack.addArrangedSubview(wrappingNote("A quick tap-and-release within the delay switches to the previous window without showing the panel — like macOS Command-Tab."))
+
+        // Troubleshooting. Window detection on macOS is mostly undocumented
+        // behavior, and the cases that go wrong (hidden apps, full-screen
+        // Spaces) only exist on a real desktop — this dump is how to see them.
+        diagnosticsButton.bezelStyle = .rounded
+        stack.addArrangedSubview(labeledRow("Troubleshooting:", diagnosticsButton))
+        stack.addArrangedSubview(wrappingNote("If a window is missing or mislabelled in the switcher, this copies what macOS reports about every app's windows to the clipboard, for a bug report."))
         return wrap(stack)
     }
 
     @objc private func delayChanged(_ sender: NSSlider) {
         Settings.shared.showDelayMs = Int(sender.doubleValue.rounded())
         delayLabel.stringValue = "\(Settings.shared.showDelayMs) ms"
+    }
+    @objc private func copyDiagnostics(_ sender: NSButton) {
+        let report = WindowEnumerator.shared.diagnosticsReport()
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(report, forType: .string)
+        sender.title = "Copied ✓"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { sender.title = "Copy Diagnostics" }
     }
     @objc private func toggleHover(_ sender: NSButton) { Settings.shared.selectOnHover = sender.state == .on }
     @objc private func toggleScroll(_ sender: NSButton) { Settings.shared.selectOnScroll = sender.state == .on }

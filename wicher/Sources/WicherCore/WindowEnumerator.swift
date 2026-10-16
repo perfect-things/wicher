@@ -712,7 +712,7 @@ final class WindowEnumerator {
     /// Window enumeration on macOS is mostly undocumented behavior, and the
     /// interesting cases (a hidden app, a full-screen app on another Space) are
     /// exactly the ones that cannot be reproduced from a shell. This is how to
-    /// see the ground truth on a real machine: menu bar → Copy Diagnostics.
+    /// see the ground truth on a real machine: Preferences → General → Copy Diagnostics.
     func diagnosticsReport() -> String {
         var out = ""
         out += "wicher diagnostics — \(Date())\n"

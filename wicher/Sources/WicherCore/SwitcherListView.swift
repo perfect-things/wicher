@@ -22,6 +22,8 @@ final class SwitcherListView: NSVisualEffectView {
     private let searchField = NSTextField(labelWithString: "")
     private let scrollView = NSScrollView()
     private let document = FlippedView()
+    /// Shown in place of the rows when there are none.
+    private let emptyLabel = NSTextField(labelWithString: "")
     private var searchHeight: NSLayoutConstraint!
     private var query = ""
     /// Shown in the search bar's place while there is no query — e.g. a
@@ -94,6 +96,11 @@ final class SwitcherListView: NSVisualEffectView {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.documentView = document
 
+        emptyLabel.alignment = .center
+        emptyLabel.textColor = .secondaryLabelColor
+        emptyLabel.isHidden = true
+        document.addSubview(emptyLabel)
+
         addSubview(searchContainer)
         addSubview(scrollView)
 
@@ -121,6 +128,7 @@ final class SwitcherListView: NSVisualEffectView {
     func setQuery(_ query: String) {
         self.query = query
         updateSearchBar()
+        updateEmptyLabel()
     }
 
     /// Shows `notice` in the search bar's place whenever there is no query.
@@ -191,7 +199,15 @@ final class SwitcherListView: NSVisualEffectView {
         }
         itemPool[items...].forEach { $0.isHidden = true }
         headerPool[headers...].forEach { $0.isHidden = true }
+        updateEmptyLabel()
         layoutRows()
+    }
+
+    /// "No matching windows" while searching, "No windows" otherwise.
+    private func updateEmptyLabel() {
+        emptyLabel.isHidden = !rows.isEmpty
+        emptyLabel.stringValue = query.isEmpty ? "No windows" : "No matching windows"
+        emptyLabel.font = .systemFont(ofSize: metrics.titleSize, weight: .regular)
     }
 
     /// Places the visible rows top to bottom and sizes the document to fit.
@@ -199,6 +215,13 @@ final class SwitcherListView: NSVisualEffectView {
         let insets = Self.listInsets
         let width = scrollView.contentSize.width
         let rowWidth = max(0, width - insets.left - insets.right)
+        if rows.isEmpty {
+            // `preferredHeight` reserves one row's height for exactly this.
+            let height = ceil(emptyLabel.intrinsicContentSize.height)
+            emptyLabel.frame = NSRect(x: insets.left,
+                                      y: insets.top + ((metrics.rowHeight - height) / 2).rounded(),
+                                      width: rowWidth, height: height)
+        }
         var y = insets.top
         var items = 0
         var headers = 0
@@ -214,6 +237,7 @@ final class SwitcherListView: NSVisualEffectView {
                 y += metrics.rowHeight
             }
         }
+        if rows.isEmpty { y += metrics.rowHeight }
         document.frame = NSRect(x: 0, y: 0, width: width, height: y + insets.bottom)
     }
 

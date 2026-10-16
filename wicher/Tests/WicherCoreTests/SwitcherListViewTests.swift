@@ -24,7 +24,13 @@ final class SwitcherListViewTests: XCTestCase {
 
     private func rowSubviews(_ view: SwitcherListView) -> [NSView] {
         let scroll = view.subviews.compactMap { $0 as? NSScrollView }.first!
-        return scroll.documentView!.subviews.sorted { $0.frame.minY < $1.frame.minY }
+        return scroll.documentView!.subviews
+            .filter { $0 is SwitcherRowView || $0 is SwitcherHeaderView }
+            .sorted { $0.frame.minY < $1.frame.minY }
+    }
+
+    private func documentSubviews(_ view: SwitcherListView) -> [NSView] {
+        view.subviews.compactMap { $0 as? NSScrollView }.first!.documentView!.subviews
     }
 
     func testRowsAreStackedTopToBottomAtFixedHeights() {
@@ -87,6 +93,41 @@ final class SwitcherListViewTests: XCTestCase {
                 view.cacheDisplay(in: view.bounds, to: rep)
                 try? rep.representation(using: .png, properties: [:])?
                     .write(to: URL(fileURLWithPath: dir).appendingPathComponent("list.png"))
+            }
+        }
+    }
+
+    private func emptyLabel(_ view: SwitcherListView) -> NSTextField? {
+        documentSubviews(view).compactMap { $0 as? NSTextField }.first
+    }
+
+    func testEmptyStateMessage() {
+        let view = makeView()
+        view.setQuery("zzz")
+        view.render([], metrics: metrics)
+        view.layoutSubtreeIfNeeded()
+        let label = emptyLabel(view)
+        XCTAssertEqual(label?.isHidden, false)
+        XCTAssertEqual(label?.stringValue, "No matching windows")
+        XCTAssertEqual(label?.frame.midY ?? 0, 6 + metrics.rowHeight / 2, accuracy: 1)
+
+        view.setQuery("")
+        view.render([], metrics: metrics)
+        XCTAssertEqual(emptyLabel(view)?.stringValue, "No windows")
+
+        view.render(rows(1), metrics: metrics)
+        XCTAssertEqual(emptyLabel(view)?.isHidden, true)
+
+        if let dir = ProcessInfo.processInfo.environment["WICHER_SNAPSHOT_DIR"] {
+            let small = makeView(height: 52 + view.preferredHeight(maxListHeight: 1000))
+            small.setQuery("zzz")
+            small.render([], metrics: metrics)
+            small.frame.size.height = small.preferredHeight(maxListHeight: 1000)
+            small.layoutSubtreeIfNeeded()
+            if let rep = small.bitmapImageRepForCachingDisplay(in: small.bounds) {
+                small.cacheDisplay(in: small.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?
+                    .write(to: URL(fileURLWithPath: dir).appendingPathComponent("empty.png"))
             }
         }
     }

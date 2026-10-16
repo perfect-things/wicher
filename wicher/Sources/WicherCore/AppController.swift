@@ -89,8 +89,6 @@ final class AppController: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Preferences…", action: #selector(openPreferences), keyEquivalent: ",")
             .target = self
-        menu.addItem(withTitle: "Copy Diagnostics", action: #selector(copyDiagnostics), keyEquivalent: "")
-            .target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Wicher", action: #selector(quit), keyEquivalent: "q")
             .target = self
@@ -108,14 +106,6 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     @objc private func openPreferences() { preferences.show() }
 
-    /// Dumps what AX and CGWindowList report for every app onto the clipboard.
-    /// The cases that misbehave (hidden apps, full-screen Spaces) only exist on
-    /// a real desktop, so this is the only way to see them.
-    @objc private func copyDiagnostics() {
-        let report = WindowEnumerator.shared.diagnosticsReport()
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(report, forType: .string)
-    }
     @objc private func quit() { NSApp.terminate(nil) }
 
     // MARK: - Settings

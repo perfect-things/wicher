@@ -1,9 +1,9 @@
 # wicher — code review: architecture, quality, performance, UX
 
 > **Status (2026-10-16).** Everything in §2–§4 and §6 has been addressed, plus the §5
-> selected-row contrast and signing items; see the git log. Remaining open: the rest of
-> §5 (VoiceOver, empty state, searching app-only entries, close/quit from the panel,
-> diagnostics feedback) and localization (§3.3). Line references below are historical.
+> selected-row contrast and signing items; see the git log. Also done from §5: the empty-state
+> message and diagnostics feedback (the button now says "Copied ✓"). Remaining open:
+> VoiceOver, searching app-only entries, close/quit from the panel, and localization (§3.3). Line references below are historical.
 
 Review of `wicher/Sources/wicher` at the point where the `tasks.md` issue list was
 addressed. Line references are to the tree *after* those fixes landed.
@@ -174,7 +174,8 @@ layer-0 window is far more likely to be chrome than a real window.
 
 The interesting cases cannot be reproduced from a shell: a process without
 Accessibility trust gets `kAXErrorAPIDisabled` for everything, and full-screen Spaces
-and hidden apps only exist on a live desktop. **Menu bar → Copy Diagnostics** now
+and hidden apps only exist on a live desktop. **Copy Diagnostics** (now in Preferences →
+General; it was first in the menu bar)
 dumps, per app, what AX reported versus what CGWindowList reports (ids, layer,
 on-screen, size, title, per-app AX latency). If any of issues 1–4 persist, that dump
 is the thing to look at — in particular `answered=false` on an app whose windows you
