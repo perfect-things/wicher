@@ -24,6 +24,8 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_PATH" "$APP/Contents/MacOS/Wicher"
 cp Info.plist "$APP/Contents/Info.plist"
+# Icon: prebuilt by scripts/make-icon.sh from Resources/Wicher.icon (needs Xcode).
+cp Resources/Assets.car Resources/Wicher.icns "$APP/Contents/Resources/"
 
 # Sign with a stable identity when one exists, so the Accessibility grant
 # survives rebuilds (see scripts/make-signing-identity.sh). Otherwise fall back

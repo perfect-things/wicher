@@ -29,6 +29,11 @@ open wicher/Wicher.app       # first launch prompts for Accessibility
 cd wicher && swift test      # unit tests (WicherCoreTests)
 ```
 
+App icon: `wicher/Resources/Wicher.icon` (Icon Composer; light/dark/tinted/clear). Run
+`wicher/scripts/make-icon.sh` after editing it — it needs full Xcode and regenerates the
+committed `Resources/Assets.car` (macOS 26+), `Resources/Wicher.icns` (older macOS) and
+previews; `build.sh` only copies them, so CLT-only builds still work.
+
 `swift build` alone compiles but produces a bare binary, not the `LSUIElement` bundle —
 hot keys and the HUD need the assembled `.app`.
 

@@ -6,6 +6,10 @@
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
 	<string>Wicher</string>
+	<key>CFBundleIconFile</key>
+	<string>Wicher</string>
+	<key>CFBundleIconName</key>
+	<string>Wicher</string>
 	<key>CFBundleExecutable</key>
 	<string>Wicher</string>
 	<key>CFBundleIdentifier</key>
