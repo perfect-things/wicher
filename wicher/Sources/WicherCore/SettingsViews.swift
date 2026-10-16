@@ -116,6 +116,11 @@ private struct AppearancePane: View {
                 } label: {
                     SettingLabel("Theme", hint: "“System” follows macOS Appearance.")
                 }
+                Picker(selection: model.binding(\.highlightStyle)) {
+                    ForEach(HighlightStyle.allCases, id: \.self) { Text($0.title).tag($0) }
+                } label: {
+                    SettingLabel("Selection highlight", hint: "How the selected window is marked in the switcher.")
+                }
             }
 
             Section {

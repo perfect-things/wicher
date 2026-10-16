@@ -20,6 +20,8 @@ final class SwitcherRowView: NSView {
     private let iconView = NSImageView()
     private let titleField = NSTextField(labelWithString: "")
     private let appField = NSTextField(labelWithString: "")
+    /// Behind the content for the glass highlight styles; made on first use.
+    private var glassView: NSView?
     /// Set on mouse-down inside this row, so a drag that merely *ends* over
     /// a row does not activate it.
     private var pressed = false
@@ -83,17 +85,43 @@ final class SwitcherRowView: NSView {
     }
 
     private func applySelectionAppearance() {
-        // The accent color is resolved to a CGColor here, so re-apply when the
+        var style = Settings.shared.highlightStyle
+        if #unavailable(macOS 26), style.isGlass { style = .neutral }
+        let glassShown = isSelected && style.isGlass
+        if #available(macOS 26, *), glassShown { showGlass(style) } else { glassView?.isHidden = true }
+
+        // Colors are resolved to CGColors here, so re-apply when the
         // effective appearance (light/dark) changes too.
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            layer?.backgroundColor = isSelected
-                ? NSColor.controlAccentColor.cgColor
-                : NSColor.clear.cgColor
+            let fill: NSColor
+            switch (isSelected, style) {
+            case (false, _), (true, .glass), (true, .clearGlass), (true, .tintedGlass): fill = .clear
+            case (true, .accent): fill = .controlAccentColor
+            case (true, .neutral): fill = NSColor.labelColor.withAlphaComponent(0.1)
+            }
+            layer?.backgroundColor = fill.cgColor
         }
-        titleField.textColor = isSelected ? .alternateSelectedControlTextColor : .labelColor
-        appField.textColor = isSelected
+        let onAccent = isSelected && style == .accent
+        titleField.textColor = onAccent ? .alternateSelectedControlTextColor : .labelColor
+        appField.textColor = onAccent
             ? NSColor.alternateSelectedControlTextColor.withAlphaComponent(0.85)
             : .secondaryLabelColor
+    }
+
+    @available(macOS 26, *)
+    private func showGlass(_ style: HighlightStyle) {
+        let glass = (glassView as? NSGlassEffectView) ?? {
+            let glass = NSGlassEffectView()
+            glass.cornerRadius = metrics.rowCornerRadius
+            glass.frame = bounds
+            glass.autoresizingMask = [.width, .height]
+            addSubview(glass, positioned: .below, relativeTo: nil)
+            glassView = glass
+            return glass
+        }()
+        glass.style = style == .clearGlass ? .clear : .regular
+        glass.tintColor = style == .tintedGlass ? NSColor.controlAccentColor.withAlphaComponent(0.4) : nil
+        glass.isHidden = false
     }
 
     override func viewDidChangeEffectiveAppearance() {

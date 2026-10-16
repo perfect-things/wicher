@@ -30,6 +30,7 @@ final class Settings {
         static let showDelayMs = "showDelayMs"
         static let profiles = "profiles"
         static let showMenuBarIcon = "showMenuBarIcon"
+        static let highlightStyle = "highlightStyle"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -43,12 +44,20 @@ final class Settings {
             Key.scrollSelects: true,
             Key.showDelayMs: 180,
             Key.showMenuBarIcon: true,
+            Key.highlightStyle: HighlightStyle.glass.rawValue,
         ])
     }
 
     var appearanceMode: AppearanceMode {
         get { AppearanceMode(rawValue: defaults.integer(forKey: Key.appearance)) ?? .system }
         set { defaults.set(newValue.rawValue, forKey: Key.appearance); post(.appearance) }
+    }
+
+    /// How the switcher draws the selected row. Read by each row when its
+    /// selection changes, so a change shows the next time the panel opens.
+    var highlightStyle: HighlightStyle {
+        get { HighlightStyle(rawValue: defaults.integer(forKey: Key.highlightStyle)) ?? .glass }
+        set { defaults.set(newValue.rawValue, forKey: Key.highlightStyle); post(.appearance) }
     }
 
     /// Icon size in points; panel width scales from it.

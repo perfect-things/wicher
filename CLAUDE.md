@@ -134,6 +134,9 @@ renders in an offscreen snapshot. Glass is composited by the window server and s
 soft edge past its bounds, so on macOS 26+ the panel window is `HUDMetrics.windowMargin`
 larger than the glass on every side and has no window shadow — a window cut flush to
 the glass showed a square outline (shadow) and clipped glow patches at the corners.
+The selected row's look is `Settings.highlightStyle` (`HighlightStyle`, default `.glass`):
+the glass styles put a lazily made `NSGlassEffectView` behind the row's content and fall
+back to the neutral fill before macOS 26; only `.accent` switches text to white.
 Rows are re-placed on the scroll view's clip-view frame changes, not in `layout()`:
 inside the glass the scroll view settles after the list view's own layout pass.
 
