@@ -25,6 +25,17 @@ struct HotKeyCombo: Equatable {
         return flags
     }
 
+    /// Shift is how every switcher cycles backwards (combo+Shift is registered
+    /// as the reverse hot key, and Shift-Tab steps back inside the panel), so a
+    /// combo that already contains Shift would collide with its own reverse.
+    var containsShift: Bool { carbonModifiers & UInt32(shiftKey) != 0 }
+
+    /// The reverse-cycling combo: this one plus Shift. Nil when the combo
+    /// already holds Shift, since the two would be the same key chord.
+    var reverse: HotKeyCombo? {
+        containsShift ? nil : HotKeyCombo(keyCode: keyCode, carbonModifiers: carbonModifiers | UInt32(shiftKey))
+    }
+
     /// Human-readable form, e.g. "⌥Tab".
     var displayString: String {
         var s = ""
@@ -52,13 +63,22 @@ final class HotKeyCenter {
 
     private init() { installHandler() }
 
+    deinit {
+        refs.values.forEach { UnregisterEventHotKey($0) }
+        if let handlerRef { RemoveEventHandler(handlerRef) }
+    }
+
     private func installHandler() {
         var specs = [
             EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: OSType(kEventHotKeyPressed)),
             EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: OSType(kEventHotKeyReleased)),
         ]
-        InstallEventHandler(GetApplicationEventTarget(), { _, event, _ -> OSStatus in
-            guard let event else { return OSStatus(eventNotHandledErr) }
+        // `userData` carries `self` (unretained: the handler is removed in
+        // `deinit`, before `self` goes away) rather than reaching for `shared`.
+        let userData = Unmanaged.passUnretained(self).toOpaque()
+        InstallEventHandler(GetApplicationEventTarget(), { _, event, userData -> OSStatus in
+            guard let event, let userData else { return OSStatus(eventNotHandledErr) }
+            let center = Unmanaged<HotKeyCenter>.fromOpaque(userData).takeUnretainedValue()
             var hkID = EventHotKeyID()
             let status = GetEventParameter(event,
                                            OSType(kEventParamDirectObject),
@@ -69,10 +89,10 @@ final class HotKeyCenter {
                                            &hkID)
             if status == noErr {
                 let pressed = GetEventKind(event) == UInt32(kEventHotKeyPressed)
-                HotKeyCenter.shared.actions[hkID.id]?(pressed)
+                center.actions[hkID.id]?(pressed)
             }
             return noErr
-        }, 2, &specs, nil, &handlerRef)
+        }, 2, &specs, userData, &handlerRef)
     }
 
     /// Registers a combo. The handler is called with `true` on press and
@@ -89,7 +109,10 @@ final class HotKeyCenter {
                                          GetApplicationEventTarget(),
                                          0,
                                          &ref)
-        guard status == noErr, let ref else { return nil }
+        guard status == noErr, let ref else {
+            NSLog("wicher: RegisterEventHotKey(%@) failed: %d", combo.displayString, status)
+            return nil
+        }
         actions[id] = handler
         refs[id] = ref
         return id

@@ -15,10 +15,12 @@ final class SwitcherRowView: NSView {
     private let iconView = NSImageView()
     private let titleField = NSTextField(labelWithString: "")
     private let appField = NSTextField(labelWithString: "")
-    private var trackingArea: NSTrackingArea?
+    /// Set on mouse-down inside this row, so a drag that merely *ends* over
+    /// a row does not activate it.
+    private var pressed = false
 
     var isSelected: Bool = false {
-        didSet { needsLayout = true }
+        didSet { if isSelected != oldValue { applySelectionAppearance() } }
     }
 
     init(displayIndex: Int, metrics: HUDMetrics) {
@@ -55,9 +57,17 @@ final class SwitcherRowView: NSView {
             titleField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
             titleField.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
+
+        // `.inVisibleRect` keeps the hover region matched to what is actually
+        // visible as the list scrolls; AppKit maintains the rect for us.
+        addTrackingArea(NSTrackingArea(rect: .zero,
+                                       options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                       owner: self,
+                                       userInfo: nil))
+        applySelectionAppearance()
     }
 
-    required init?(coder: NSCoder) { fatalError("not used") }
+    required init?(coder: NSCoder) { preconditionFailure("not used") }
 
     func configure(icon: NSImage?, title: NSAttributedString, appName: String) {
         iconView.image = icon
@@ -65,28 +75,34 @@ final class SwitcherRowView: NSView {
         appField.stringValue = appName
     }
 
-    override func layout() {
-        super.layout()
-        layer?.backgroundColor = isSelected
-            ? NSColor.controlAccentColor.cgColor
-            : NSColor.clear.cgColor
-        titleField.textColor = isSelected ? .white : .labelColor
-        appField.textColor = isSelected ? NSColor.white.withAlphaComponent(0.85) : .secondaryLabelColor
+    private func applySelectionAppearance() {
+        // The accent color is resolved to a CGColor here, so re-apply when the
+        // effective appearance (light/dark) changes too.
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = isSelected
+                ? NSColor.controlAccentColor.cgColor
+                : NSColor.clear.cgColor
+        }
+        titleField.textColor = isSelected ? .alternateSelectedControlTextColor : .labelColor
+        appField.textColor = isSelected
+            ? NSColor.alternateSelectedControlTextColor.withAlphaComponent(0.85)
+            : .secondaryLabelColor
     }
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea { removeTrackingArea(trackingArea) }
-        let area = NSTrackingArea(rect: bounds,
-                                  options: [.mouseEnteredAndExited, .activeAlways],
-                                  owner: self,
-                                  userInfo: nil)
-        addTrackingArea(area)
-        trackingArea = area
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applySelectionAppearance()
     }
 
     override func mouseEntered(with event: NSEvent) { delegate?.rowHovered(displayIndex: displayIndex) }
-    override func mouseUp(with event: NSEvent) { delegate?.rowClicked(displayIndex: displayIndex) }
+
+    override func mouseDown(with event: NSEvent) { pressed = true }
+
+    override func mouseUp(with event: NSEvent) {
+        defer { pressed = false }
+        guard pressed, bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        delegate?.rowClicked(displayIndex: displayIndex)
+    }
 }
 
 /// A dim, centered section header ("Minimized", "Apps", …). Not selectable.
@@ -104,5 +120,5 @@ final class SwitcherHeaderView: NSView {
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
-    required init?(coder: NSCoder) { fatalError("not used") }
+    required init?(coder: NSCoder) { preconditionFailure("not used") }
 }

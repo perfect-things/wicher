@@ -71,7 +71,7 @@ final class ProfileCardView: NSView {
         }
     }
 
-    required init?(coder: NSCoder) { fatalError("not used") }
+    required init?(coder: NSCoder) { preconditionFailure("not used") }
 
     override func updateLayer() { applyLayerColors() }
 
@@ -121,7 +121,17 @@ final class ProfileCardView: NSView {
         if event.modifierFlags.contains(.option) { mods |= UInt32(optionKey) }
         if event.modifierFlags.contains(.shift) { mods |= UInt32(shiftKey) }
         if event.modifierFlags.contains(.control) { mods |= UInt32(controlKey) }
-        currentCombo = HotKeyCombo(keyCode: UInt32(event.keyCode), carbonModifiers: mods)
+        let combo = HotKeyCombo(keyCode: UInt32(event.keyCode), carbonModifiers: mods)
+        // Shift is reserved for cycling backwards (see `HotKeyCombo.reverse`).
+        guard !combo.containsShift else {
+            shortcutButton.title = "⇧ is reserved for reverse"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self, self.recordingMonitor == nil else { return }
+                self.shortcutButton.title = self.currentCombo.displayString
+            }
+            return
+        }
+        currentCombo = combo
         shortcutButton.title = currentCombo.displayString
         delegate?.card(profileID, didSetShortcut: currentCombo)
     }

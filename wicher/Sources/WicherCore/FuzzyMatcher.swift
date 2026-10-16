@@ -15,56 +15,44 @@ enum FuzzyMatcher {
     static func match(query: String, candidate: String) -> FuzzyResult? {
         if query.isEmpty { return FuzzyResult(score: 0, ranges: []) }
 
-        let qChars = Array(query.lowercased())
+        // Lowercase per character and compare as strings: a character's
+        // lowercase form is not always a single `Character` (e.g. "İ"), so
+        // `Character(ch.lowercased())` can trap on an unusual window title.
+        let qChars = query.map { $0.lowercased() }
         let cChars = Array(candidate)
         var qi = 0
-        var matchedCharIndexes: [Int] = []
         var score = 0
         var lastMatch = -2
 
+        // Highlight ranges are built in the same pass, in UTF-16 offsets, so
+        // they line up with NSAttributedString without re-walking the string.
+        var ranges: [NSRange] = []
+        var utf16Offset = 0
+
         for (ci, ch) in cChars.enumerated() {
             guard qi < qChars.count else { break }
-            if Character(ch.lowercased()) == qChars[qi] {
-                matchedCharIndexes.append(ci)
-                if ci == lastMatch + 1 { score += 5 } else { score += 1 }
-                let prevIsSeparator = ci == 0 || !cChars[ci - 1].isLetter && !cChars[ci - 1].isNumber
-                if prevIsSeparator { score += 3 }
-                lastMatch = ci
-                qi += 1
+            let width = ch.utf16.count
+            defer { utf16Offset += width }
+            guard ch.lowercased() == qChars[qi] else { continue }
+
+            if ci == lastMatch + 1, let last = ranges.indices.last {
+                score += 5
+                ranges[last].length += width
+            } else {
+                score += 1
+                ranges.append(NSRange(location: utf16Offset, length: width))
             }
+            let prevIsSeparator = ci == 0 || !cChars[ci - 1].isLetter && !cChars[ci - 1].isNumber
+            if prevIsSeparator { score += 3 }
+            lastMatch = ci
+            qi += 1
         }
 
         guard qi == qChars.count else { return nil }
 
         // Prefer shorter candidates slightly.
-        score += max(0, 24 - candidate.count)
+        score += max(0, 24 - cChars.count)
 
-        return FuzzyResult(score: score, ranges: contiguousRanges(matchedCharIndexes, in: candidate))
-    }
-
-    /// Collapses adjacent matched character offsets into NSRanges valid for the
-    /// candidate string (UTF-16 based, so highlighting lines up correctly).
-    private static func contiguousRanges(_ charIndexes: [Int], in candidate: String) -> [NSRange] {
-        guard !charIndexes.isEmpty else { return [] }
-        var ranges: [NSRange] = []
-        var runStart = charIndexes[0]
-        var runEnd = charIndexes[0]
-        for idx in charIndexes.dropFirst() {
-            if idx == runEnd + 1 {
-                runEnd = idx
-            } else {
-                ranges.append(nsRange(fromCharIndex: runStart, through: runEnd, in: candidate))
-                runStart = idx
-                runEnd = idx
-            }
-        }
-        ranges.append(nsRange(fromCharIndex: runStart, through: runEnd, in: candidate))
-        return ranges
-    }
-
-    private static func nsRange(fromCharIndex start: Int, through end: Int, in candidate: String) -> NSRange {
-        let startIndex = candidate.index(candidate.startIndex, offsetBy: start)
-        let endIndex = candidate.index(candidate.startIndex, offsetBy: end + 1)
-        return NSRange(startIndex..<endIndex, in: candidate)
+        return FuzzyResult(score: score, ranges: ranges)
     }
 }

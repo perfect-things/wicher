@@ -18,6 +18,10 @@ final class SwitcherListView: NSVisualEffectView {
     private let scrollView = NSScrollView()
     private let stack = FlippedStack()
     private var searchHeight: NSLayoutConstraint!
+    private var query = ""
+    /// Shown in the search bar's place while there is no query — e.g. a
+    /// warning that Accessibility access is off.
+    private var notice: String?
 
     private var rows: [DisplayRow] = []
     private var metrics = HUDMetrics.make(iconSize: 32, textSize: 16, rowPadding: 7)
@@ -33,7 +37,7 @@ final class SwitcherListView: NSVisualEffectView {
         build()
     }
 
-    required init?(coder: NSCoder) { fatalError("not used") }
+    required init?(coder: NSCoder) { preconditionFailure("not used") }
 
     /// A resizable rounded-rect mask for the visual-effect view.
     ///
@@ -114,8 +118,29 @@ final class SwitcherListView: NSVisualEffectView {
 
     /// Shows the search bar for a non-empty query; hides it otherwise.
     func setQuery(_ query: String) {
-        searchHeight.constant = query.isEmpty ? 0 : Self.searchBarHeight
-        searchField.stringValue = query.isEmpty ? "" : "🔍  \(query)"
+        self.query = query
+        updateSearchBar()
+    }
+
+    /// Shows `notice` in the search bar's place whenever there is no query.
+    func setNotice(_ notice: String?) {
+        self.notice = notice
+        updateSearchBar()
+    }
+
+    private func updateSearchBar() {
+        if !query.isEmpty {
+            searchField.stringValue = "🔍  \(query)"
+            searchField.font = .systemFont(ofSize: 18, weight: .regular)
+            searchField.textColor = .labelColor
+        } else if let notice {
+            searchField.stringValue = "⚠︎  \(notice)"
+            searchField.font = .systemFont(ofSize: 13, weight: .medium)
+            searchField.textColor = .secondaryLabelColor
+        } else {
+            searchField.stringValue = ""
+        }
+        searchHeight.constant = (query.isEmpty && notice == nil) ? 0 : Self.searchBarHeight
     }
 
     /// Replaces every row view with ones built from `rows`.

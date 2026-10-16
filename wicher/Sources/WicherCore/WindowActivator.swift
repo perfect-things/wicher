@@ -18,7 +18,7 @@ enum WindowActivator {
         if info.pid == ProcessInfo.processInfo.processIdentifier, !info.isAppOnly {
             if let window = NSApp.windows.first(where: { $0.cgWindowID == info.cgWindowID }) {
                 if window.isMiniaturized { window.deminiaturize(nil) }
-                NSApp.activate(ignoringOtherApps: true)
+                if #available(macOS 14, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }
                 window.makeKeyAndOrderFront(nil)
                 if let wid = info.cgWindowID {
                     WindowEnumerator.shared.noteActivatedWindow(wid, pid: info.pid)
@@ -30,7 +30,7 @@ enum WindowActivator {
         if let axWindow = info.axWindow, !info.isAppOnly {
             // Activate the owning app first; some apps won't honor an
             // un-minimize/raise on a background process.
-            app?.activate(options: [.activateIgnoringOtherApps])
+            bringToFront(app)
 
             if info.isMinimized {
                 // Un-minimizing can need a moment after activation to take; set
@@ -63,10 +63,20 @@ enum WindowActivator {
         }
     }
 
+    /// `.activateIgnoringOtherApps` is deprecated from macOS 14 and has no
+    /// effect there; `activate()` is the replacement.
+    private static func bringToFront(_ app: NSRunningApplication?) {
+        if #available(macOS 14, *) {
+            app?.activate()
+        } else {
+            app?.activate(options: [.activateIgnoringOtherApps])
+        }
+    }
+
     /// Reproduce a Dock-icon click: activate, and ask the app to reopen a window.
     private static func reopen(_ app: NSRunningApplication?, info: WindowInfo) {
         guard let url = app?.bundleURL ?? bundleURL(forPID: info.pid) else {
-            app?.activate(options: [.activateIgnoringOtherApps])
+            bringToFront(app)
             return
         }
         let config = NSWorkspace.OpenConfiguration()

@@ -85,6 +85,12 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
                                   activeAppPID: activeAppPID,
                                   forward: forward)
         listView.setQuery("")
+        // Without Accessibility trust, every row comes from the CGWindowList
+        // fallback, which has no titles — say so rather than silently listing
+        // bare app names.
+        listView.setNotice(AXIsProcessTrusted()
+            ? nil
+            : "Accessibility access is off — window titles unavailable. Re-enable Wicher in System Settings.")
 
         panelShown = false
         startMonitors()

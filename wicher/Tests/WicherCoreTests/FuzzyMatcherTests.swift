@@ -50,4 +50,17 @@ final class FuzzyMatcherTests: XCTestCase {
         let long = FuzzyMatcher.match(query: "mail", candidate: "Mail — Inbox (42 messages)")!
         XCTAssertGreaterThan(short.score, long.score)
     }
+
+    func testMultiScalarLowercaseDoesNotTrap() {
+        // "İ".lowercased() is "i̇" — not a single Character. Used to trap.
+        XCTAssertNil(FuzzyMatcher.match(query: "x", candidate: "İstanbul"))
+        let r = FuzzyMatcher.match(query: "stan", candidate: "İstanbul")
+        XCTAssertEqual(r?.ranges, [NSRange(location: 1, length: 4)])
+    }
+
+    func testRangesAfterWideCharactersAndGaps() {
+        let r = FuzzyMatcher.match(query: "ab", candidate: "😀a😀b")
+        XCTAssertEqual(r?.ranges, [NSRange(location: 2, length: 1),
+                                   NSRange(location: 5, length: 1)])
+    }
 }

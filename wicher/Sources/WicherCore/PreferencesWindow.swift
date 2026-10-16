@@ -26,7 +26,7 @@ final class PreferencesWindow: NSObject, ProfileCardDelegate {
         if window == nil { build() }
         profiles = Settings.shared.profiles
         rebuildCards()
-        NSApp.activate(ignoringOtherApps: true)
+        if #available(macOS 14, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }
         window?.center()
         window?.makeKeyAndOrderFront(nil)
     }

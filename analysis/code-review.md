@@ -244,6 +244,15 @@ where every reported bug lived, that split is worth the effort.
 
 ### 3.2 Specific defects
 
+> **Status (2026-10-16):** all fixed except the deminiaturize retry, which still uses
+> the 0.05 s re-check. Shift in a combo is now rejected by the recorder
+> (`HotKeyCombo.reverse` is nil for such combos, and `RegisterEventHotKey` failures are
+> logged); `FuzzyMatcher` compares lowercased `String`s and builds UTF-16 ranges in the
+> match pass; rows use `.inVisibleRect`, `applySelectionAppearance()`,
+> `alternateSelectedControlTextColor` (also closes the §5 contrast item), and require a
+> mouse-down in the same row; the Carbon handler gets `self` via `userData` and is
+> removed in `deinit`; `fatalError("not used")` → `preconditionFailure`.
+
 - **`AppController.swift:80`** — the reverse hot key is the forward combo plus
   `shiftKey`. If a user's combo *already* contains Shift, forward and reverse are the
   same combo; the second `RegisterEventHotKey` fails with `eventHotKeyExistsErr`, the
@@ -335,11 +344,11 @@ Beyond the enumeration work in §1.3:
 
 ## 6. Suggested order of work
 
-1. Test target covering `WindowGrouping`, `FuzzyMatcher`, `HUDMetrics` — everything
+1. ~~Test target~~ (done) covering `WindowGrouping`, `FuzzyMatcher`, `HUDMetrics` — everything
    below is safer with it in place.
 2. Split `performScan` into a pure assembly function and test the §1.1 classification
    table directly.
 3. Row-view reuse in `rebuildRows`.
-4. The defect list in §3.2 — each is small and independent.
+4. ~~The defect list in §3.2~~ — done, bar the deminiaturize observer.
 5. Stable signing identity in `build.sh`.
-6. `SwitcherController` split (§2.2), once something new needs to go in that file.
+6. ~~`SwitcherController` split (§2.2)~~ — done.

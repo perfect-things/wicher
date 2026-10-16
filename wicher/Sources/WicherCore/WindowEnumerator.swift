@@ -209,6 +209,18 @@ final class WindowEnumerator {
         scheduleRefresh(after: 0)
     }
 
+    /// Call when Accessibility trust arrives while running (it is lost on every
+    /// ad-hoc rebuild). Observers that failed to attach without trust are
+    /// retried, and the snapshot — built from CGWindowList alone, so untitled —
+    /// is dropped instead of being served for another refresh cycle.
+    func accessibilityGranted() {
+        installObservers(for: NSWorkspace.shared.runningApplications)
+        lock.lock()
+        snapshot = nil
+        lock.unlock()
+        scheduleRefresh(after: 0)
+    }
+
     // MARK: - MRU bookkeeping
 
     func noteActivated(pid: pid_t) {
