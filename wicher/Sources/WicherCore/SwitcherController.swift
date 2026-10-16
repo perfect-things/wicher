@@ -32,6 +32,19 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
         super.init()
         listView.rowDelegate = self
         panel.contentView = listView
+        NotificationCenter.default.addObserver(self, selector: #selector(windowsRefreshed),
+                                               name: WindowEnumerator.didRefresh, object: nil)
+    }
+
+    /// A background scan finished. If the panel is up, show the fresh state —
+    /// new titles, windows opened or closed since summon — without losing the
+    /// user's place. Not before the panel is shown: a quick tap must switch to
+    /// exactly the window that was preselected.
+    @objc private func windowsRefreshed() {
+        guard panelShown, let latest = WindowEnumerator.shared.latestSnapshot(),
+              session?.update(enumeration: latest) == true else { return }
+        renderRows()
+        updateSelectionHighlight()
     }
 
     // MARK: - Entry points

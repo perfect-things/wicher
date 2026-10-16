@@ -19,7 +19,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         setupStatusItem()
         WindowEnumerator.shared.start()
         observeAppActivation()
-        preferences.onProfilesChanged = { [weak self] in self?.registerHotKeys() }
+        observeSettings()
         registerHotKeys()
         promptForAccessibilityIfNeeded()
         watchAccessibilityTrust()
@@ -117,6 +117,19 @@ final class AppController: NSObject, NSApplicationDelegate {
         NSPasteboard.general.setString(report, forType: .string)
     }
     @objc private func quit() { NSApp.terminate(nil) }
+
+    // MARK: - Settings
+
+    private func observeSettings() {
+        NotificationCenter.default.addObserver(forName: Settings.didChange, object: Settings.shared,
+                                               queue: .main) { [weak self] note in
+            switch note.userInfo?[Settings.changeKey] as? Settings.Change {
+            case .profiles: self?.registerHotKeys()
+            case .appearance: AppearanceManager.apply(Settings.shared.appearanceMode)
+            default: break
+            }
+        }
+    }
 
     // MARK: - Hot keys (one forward + one reverse per profile)
 

@@ -15,7 +15,7 @@ enum DisplayRow {
 struct SwitcherSession {
     let profile: SwitcherProfile
     let activeAppPID: pid_t?
-    private let enumeration: Enumeration
+    private var enumeration: Enumeration
 
     private(set) var query = ""
     private(set) var rows: [DisplayRow] = []
@@ -65,6 +65,47 @@ struct SwitcherSession {
         guard let pos = selectableIndexes.firstIndex(of: rowIndex) else { return false }
         selectionPos = pos
         return true
+    }
+
+    // MARK: - Live updates
+
+    /// Swaps in a newer enumeration (a background scan finished while the
+    /// panel was open), keeping the same window selected if it still exists.
+    /// Returns false — and changes nothing — when the visible rows would be
+    /// identical, so the caller can skip a redraw.
+    @discardableResult
+    mutating func update(enumeration: Enumeration) -> Bool {
+        let before = signature
+        let selectedKey = selectedWindow?.key
+        let previous = (self.enumeration, rows, selectableIndexes, selectionPos)
+
+        self.enumeration = enumeration
+        rebuildRows()
+        guard signature != before else {
+            (self.enumeration, rows, selectableIndexes, selectionPos) = previous
+            return false
+        }
+        if let selectedKey, let pos = selectableIndexes.firstIndex(where: { key(atRow: $0) == selectedKey }) {
+            selectionPos = pos
+        } else {
+            selectionPos = min(selectionPos, max(selectableIndexes.count - 1, 0))
+        }
+        return true
+    }
+
+    /// What the user can see: headers, and each item's identity and label.
+    private var signature: [String] {
+        rows.map { row in
+            switch row {
+            case let .header(title): return "h:\(title)"
+            case let .item(info, _): return "i:\(info.key):\(info.displayTitle):\(info.appName)"
+            }
+        }
+    }
+
+    private func key(atRow index: Int) -> WindowKey? {
+        if case let .item(info, _) = rows[index] { return info.key }
+        return nil
     }
 
     // MARK: - Search

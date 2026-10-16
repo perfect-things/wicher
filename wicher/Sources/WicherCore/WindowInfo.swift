@@ -48,4 +48,20 @@ final class WindowInfo {
 
     /// Primary label: window title, falling back to the app name.
     var displayTitle: String { title.isEmpty ? appName : title }
+
+    /// Stable identity across enumerations, so a selection can survive the
+    /// model being rebuilt underneath an open panel.
+    var key: WindowKey {
+        if isAppOnly { return .app(pid) }
+        if let cgWindowID { return .window(cgWindowID) }
+        return .untracked(pid, title)
+    }
+}
+
+/// See `WindowInfo.key`. A window id is unique system-wide; without one (no
+/// `_AXUIElementGetWindow`) pid + title is the best available stand-in.
+enum WindowKey: Hashable {
+    case window(CGWindowID)
+    case app(pid_t)
+    case untracked(pid_t, String)
 }

@@ -3,10 +3,22 @@ import AppKit
 /// Persistent, UserDefaults-backed settings. Deliberately tiny — no database.
 /// Per-switcher filter options live on each `SwitcherProfile`; this holds the
 /// global, cross-switcher preferences.
+///
+/// Every setter posts `Settings.didChange` (on the main thread, with the
+/// changed `Settings.Change` under `changeKey`), so consumers react to edits
+/// instead of each one having to be told. Profiles are decoded once and kept.
 final class Settings {
     static let shared = Settings()
 
-    private let defaults = UserDefaults.standard
+    static let didChange = Notification.Name("WicherSettingsDidChange")
+    static let changeKey = "change"
+
+    enum Change: String {
+        case appearance, metrics, selection, showDelay, profiles
+    }
+
+    private let defaults: UserDefaults
+    private var cachedProfiles: [SwitcherProfile]?
 
     private enum Key {
         static let appearance = "appearanceMode"
@@ -19,7 +31,8 @@ final class Settings {
         static let profiles = "profiles"
     }
 
-    private init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         defaults.register(defaults: [
             Key.appearance: AppearanceMode.system.rawValue,
             Key.iconSize: 32,
@@ -33,56 +46,65 @@ final class Settings {
 
     var appearanceMode: AppearanceMode {
         get { AppearanceMode(rawValue: defaults.integer(forKey: Key.appearance)) ?? .system }
-        set { defaults.set(newValue.rawValue, forKey: Key.appearance) }
+        set { defaults.set(newValue.rawValue, forKey: Key.appearance); post(.appearance) }
     }
 
     /// Icon size in points; panel width scales from it.
     var iconSize: Int {
         get { defaults.integer(forKey: Key.iconSize).clamped(to: HUDMetrics.iconRange) }
-        set { defaults.set(newValue.clamped(to: HUDMetrics.iconRange), forKey: Key.iconSize) }
+        set { defaults.set(newValue.clamped(to: HUDMetrics.iconRange), forKey: Key.iconSize); post(.metrics) }
     }
 
     /// Window-title text size in points.
     var textSize: Int {
         get { defaults.integer(forKey: Key.textSize).clamped(to: HUDMetrics.textRange) }
-        set { defaults.set(newValue.clamped(to: HUDMetrics.textRange), forKey: Key.textSize) }
+        set { defaults.set(newValue.clamped(to: HUDMetrics.textRange), forKey: Key.textSize); post(.metrics) }
     }
 
     /// Vertical padding above/below each row's content, in points.
     var rowPadding: Int {
         get { defaults.integer(forKey: Key.rowPadding).clamped(to: HUDMetrics.paddingRange) }
-        set { defaults.set(newValue.clamped(to: HUDMetrics.paddingRange), forKey: Key.rowPadding) }
+        set { defaults.set(newValue.clamped(to: HUDMetrics.paddingRange), forKey: Key.rowPadding); post(.metrics) }
     }
 
     var selectOnHover: Bool {
         get { defaults.bool(forKey: Key.hoverSelects) }
-        set { defaults.set(newValue, forKey: Key.hoverSelects) }
+        set { defaults.set(newValue, forKey: Key.hoverSelects); post(.selection) }
     }
 
     var selectOnScroll: Bool {
         get { defaults.bool(forKey: Key.scrollSelects) }
-        set { defaults.set(newValue, forKey: Key.scrollSelects) }
+        set { defaults.set(newValue, forKey: Key.scrollSelects); post(.selection) }
     }
 
     /// Delay before the panel is drawn. A quick tap+release within this window
     /// switches to the previous window without the panel ever appearing.
     var showDelayMs: Int {
         get { defaults.integer(forKey: Key.showDelayMs) }
-        set { defaults.set(max(0, newValue), forKey: Key.showDelayMs) }
+        set { defaults.set(max(0, newValue), forKey: Key.showDelayMs); post(.showDelay) }
     }
 
     var profiles: [SwitcherProfile] {
         get {
-            guard let data = defaults.data(forKey: Key.profiles),
-                  let decoded = try? JSONDecoder().decode([SwitcherProfile].self, from: data),
-                  !decoded.isEmpty
-            else { return SwitcherProfile.defaults() }
-            return decoded
+            if let cachedProfiles { return cachedProfiles }
+            let decoded = defaults.data(forKey: Key.profiles)
+                .flatMap { try? JSONDecoder().decode([SwitcherProfile].self, from: $0) }
+            let profiles = (decoded?.isEmpty == false) ? decoded! : SwitcherProfile.defaults()
+            cachedProfiles = profiles
+            return profiles
         }
         set {
             if let data = try? JSONEncoder().encode(newValue) {
                 defaults.set(data, forKey: Key.profiles)
             }
+            cachedProfiles = newValue.isEmpty ? nil : newValue
+            post(.profiles)
         }
+    }
+
+    private func post(_ change: Change) {
+        let post = { NotificationCenter.default.post(name: Self.didChange, object: self,
+                                                      userInfo: [Self.changeKey: change]) }
+        if Thread.isMainThread { post() } else { DispatchQueue.main.async(execute: post) }
     }
 }

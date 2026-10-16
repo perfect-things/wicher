@@ -53,6 +53,9 @@ private struct Snapshot {
 final class WindowEnumerator {
     static let shared = WindowEnumerator()
 
+    /// Posted on the main thread after a background scan replaces the snapshot.
+    static let didRefresh = Notification.Name("WicherWindowEnumeratorDidRefresh")
+
     // MARK: - MRU state (main thread only)
 
     /// Application pids, most-recently-active first.
@@ -215,6 +218,15 @@ final class WindowEnumerator {
             return order(reconcile(cached))
         }
         return order(performScan(timeout: foregroundTimeout))
+    }
+
+    /// The latest snapshot, MRU-ordered, with no IPC and no refresh scheduled —
+    /// for updating an already-open panel after `didRefresh`.
+    func latestSnapshot() -> Enumeration? {
+        lock.lock()
+        let cached = snapshot
+        lock.unlock()
+        return cached.map(order)
     }
 
     /// Brings a cached snapshot up to date without a full AX pass.
@@ -446,6 +458,7 @@ final class WindowEnumerator {
             _ = self.performScan(timeout: self.backgroundTimeout)
             DispatchQueue.main.async {
                 self.refreshInFlight = false
+                NotificationCenter.default.post(name: Self.didRefresh, object: self)
                 if self.refreshAgain {
                     self.refreshAgain = false
                     self.scheduleRefresh(after: 0)

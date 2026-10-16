@@ -10,9 +10,6 @@ private final class FlippedStack: NSStackView {
 /// window, so it respects `NSApp.appearance` (the Light/Dark/System support
 /// Contexts' settings window lacks).
 final class PreferencesWindow: NSObject, ProfileCardDelegate {
-    /// Called when profiles (or their shortcuts) change, so hot keys re-register.
-    var onProfilesChanged: (() -> Void)?
-
     private var window: NSWindow?
     private var profiles: [SwitcherProfile] = []
     private let cardsStack = FlippedStack()
@@ -152,7 +149,6 @@ final class PreferencesWindow: NSObject, ProfileCardDelegate {
         let themes: [AppearanceMode] = [.light, .dark, .system]
         guard themes.indices.contains(sender.selectedSegment) else { return }
         Settings.shared.appearanceMode = themes[sender.selectedSegment]
-        AppearanceManager.apply(themes[sender.selectedSegment])
     }
     @objc private func iconChanged(_ sender: NSSlider) {
         Settings.shared.iconSize = Int(sender.doubleValue.rounded())
@@ -222,8 +218,7 @@ final class PreferencesWindow: NSObject, ProfileCardDelegate {
     }
 
     private func saveProfiles() {
-        Settings.shared.profiles = profiles
-        onProfilesChanged?()
+        Settings.shared.profiles = profiles   // AppController re-registers hot keys
     }
 
     private func mutate(_ id: UUID, _ change: (inout SwitcherProfile) -> Void) {
