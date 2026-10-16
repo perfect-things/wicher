@@ -33,22 +33,9 @@ enum WindowActivator {
             bringToFront(app)
 
             if info.isMinimized {
-                // Un-minimizing can need a moment after activation to take; set
-                // the attribute, and retry once on the next runloop if it is
-                // still minimized.
-                AXUIElementSetAttributeValue(axWindow, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    var ref: CFTypeRef?
-                    if AXUIElementCopyAttributeValue(axWindow, kAXMinimizedAttribute as CFString, &ref) == .success,
-                       (ref as? Bool) == true {
-                        AXUIElementSetAttributeValue(axWindow, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
-                    }
-                    AXUIElementSetAttributeValue(axWindow, kAXMainAttribute as CFString, kCFBooleanTrue)
-                    AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString)
-                }
+                DeminiaturizeWaiter.unminimizeThenRaise(axWindow, pid: info.pid)
             } else {
-                AXUIElementSetAttributeValue(axWindow, kAXMainAttribute as CFString, kCFBooleanTrue)
-                AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString)
+                raise(axWindow)
             }
         } else {
             // App-only / CGWindowList-only: emulate a Dock-icon click so a
@@ -61,6 +48,11 @@ enum WindowActivator {
         } else {
             WindowEnumerator.shared.noteActivated(pid: info.pid)
         }
+    }
+
+    static func raise(_ axWindow: AXUIElement) {
+        AXUIElementSetAttributeValue(axWindow, kAXMainAttribute as CFString, kCFBooleanTrue)
+        AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString)
     }
 
     /// `.activateIgnoringOtherApps` is deprecated from macOS 14 and has no
@@ -88,5 +80,65 @@ enum WindowActivator {
 
     private static func bundleURL(forPID pid: pid_t) -> URL? {
         NSRunningApplication(processIdentifier: pid)?.bundleURL
+    }
+}
+
+/// Un-minimizes a window and raises it once the Dock animation has finished.
+///
+/// Raising straight after clearing `kAXMinimized` races the animation: the
+/// window is not on screen yet, so the raise is lost (or, for some apps, the
+/// un-minimize itself is ignored until the app is active). Waiting for
+/// `kAXWindowDeminiaturizedNotification` removes the race; the timeout covers
+/// apps that never send it, and re-applies the un-minimize if it did not take.
+private final class DeminiaturizeWaiter {
+    /// Keeps waiters alive until they finish.
+    private static var pending: [ObjectIdentifier: DeminiaturizeWaiter] = [:]
+    private static let timeout: TimeInterval = 0.6
+
+    private let window: AXUIElement
+    private var observer: AXObserver?
+    private var finished = false
+
+    static func unminimizeThenRaise(_ window: AXUIElement, pid: pid_t) {
+        let waiter = DeminiaturizeWaiter(window: window)
+        pending[ObjectIdentifier(waiter)] = waiter
+        waiter.start(pid: pid)
+    }
+
+    private init(window: AXUIElement) { self.window = window }
+
+    private func start(pid: pid_t) {
+        // Observe first, then act, so the notification cannot be missed.
+        var observer: AXObserver?
+        let callback: AXObserverCallback = { _, _, _, refcon in
+            guard let refcon else { return }
+            Unmanaged<DeminiaturizeWaiter>.fromOpaque(refcon).takeUnretainedValue().finish()
+        }
+        if AXObserverCreate(pid, callback, &observer) == .success, let observer,
+           AXObserverAddNotification(observer, window, kAXWindowDeminiaturizedNotification as CFString,
+                                     Unmanaged.passUnretained(self).toOpaque()) == .success {
+            CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
+            self.observer = observer
+        }
+        AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.timeout) { [weak self] in self?.finish() }
+    }
+
+    private func finish() {
+        guard !finished else { return }
+        finished = true
+        if let observer {
+            AXObserverRemoveNotification(observer, window, kAXWindowDeminiaturizedNotification as CFString)
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
+        }
+        var ref: CFTypeRef?
+        if AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &ref) == .success,
+           (ref as? Bool) == true {
+            AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+        }
+        WindowActivator.raise(window)
+        // Released on the next turn of the run loop, after the AX callback
+        // that may have called us has returned.
+        DispatchQueue.main.async { Self.pending[ObjectIdentifier(self)] = nil }
     }
 }

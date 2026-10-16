@@ -112,9 +112,12 @@ final class WindowEnumerator {
     /// a timeout loses.
     private let foregroundTimeout: TimeInterval = 0.2
 
+    /// Registered on each app element. Window destruction is not among them:
+    /// `kAXUIElementDestroyedNotification` on an *app* element reports the
+    /// app's own destruction, so it is registered per window instead (see
+    /// `observeDestruction`).
     private static let observedNotifications: [String] = [
         kAXWindowCreatedNotification,
-        kAXUIElementDestroyedNotification,
         kAXWindowMiniaturizedNotification,
         kAXWindowDeminiaturizedNotification,
         kAXTitleChangedNotification,
@@ -808,10 +811,25 @@ final class WindowEnumerator {
 
     // MARK: - AX observers
 
-    private static let observerCallback: AXObserverCallback = { _, _, _, refcon in
+    private static let observerCallback: AXObserverCallback = { observer, element, notification, refcon in
         guard let refcon else { return }
+        // A new window: watch for it closing. The app has just made it, so it
+        // is awake and this round trip is cheap.
+        if (notification as String) == kAXWindowCreatedNotification {
+            observeDestruction(of: [element], with: observer, refcon: refcon)
+        }
         let enumerator = Unmanaged<WindowEnumerator>.fromOpaque(refcon).takeUnretainedValue()
         enumerator.scheduleRefresh(after: 0.15)
+    }
+
+    /// Registers `kAXUIElementDestroyedNotification` on each window, so closing
+    /// one triggers a refresh. The registration dies with the window.
+    private static func observeDestruction(of windows: [AXUIElement],
+                                           with observer: AXObserver,
+                                           refcon: UnsafeMutableRawPointer) {
+        for window in windows {
+            AXObserverAddNotification(observer, window, kAXUIElementDestroyedNotification as CFString, refcon)
+        }
     }
 
     private func installObservers(for apps: [NSRunningApplication]) {
@@ -839,6 +857,11 @@ final class WindowEnumerator {
                     }
                 }
                 guard attached else { continue }
+                var value: CFTypeRef?
+                if AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &value) == .success,
+                   let windows = value as? [AXUIElement] {
+                    Self.observeDestruction(of: windows, with: observer, refcon: refcon)
+                }
                 DispatchQueue.main.async {
                     guard self.observers[pid] == nil else { return }
                     self.observers[pid] = observer
