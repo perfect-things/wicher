@@ -13,10 +13,13 @@ Two things live here, and only one is code:
   / **[UNK]**. wicher is a clean reimplementation: no Contexts code, class names, icon,
   or settings layout. Keep it that way, and keep the OBS/INF/UNK discipline if you edit
   the findings.
+- `analysis/code-review.md` — review of wicher itself: root causes of the original
+  `tasks.md` issues (§1), and an open backlog of architecture / defect / perf / UX items
+  (§2–§6). Check it before refactoring; strike or update items as they land.
 - `tasks.md` — the user's running bug/issue list. Check it before starting work.
 
-The root `package.json` is vestigial (npm placeholder); there is no JS in this project
-and no git repository.
+The root `package.json` is vestigial (npm placeholder); there is no JS in this project.
+The built `wicher/Wicher.app` is committed, so every rebuild shows up in `git status`.
 
 ## Build & run
 
@@ -59,7 +62,9 @@ database. Flow of one switch:
      (grouped, or fuzzy-scored when searching) and the selection. No views or timers.
    - **`SwitcherListView`** — the panel's content view: backdrop, search bar, rows,
      selection highlight, preferred height.
-4. **`WindowEnumerator`** (singleton) — AX discovery + MRU bookkeeping.
+4. **`WindowEnumerator`** (singleton) — AX + CGWindowList discovery, a background
+   snapshot kept fresh by AX observers, title/element caches, MRU bookkeeping, and the
+   menu-bar **Copy Diagnostics** dump (`diagnosticsReport()`).
 5. **`WindowGrouping`** — pure function: `(profile, Enumeration, activePID) → [WindowSection]`.
    Put filtering/ordering policy here, not in the controller; it is the one piece that is
    trivially reasonable about in isolation.
@@ -74,30 +79,54 @@ hardcode row heights or panel widths elsewhere.
 
 ## Invariants worth knowing before changing enumeration
 
-`WindowEnumerator.enumerate()` is where most of the subtlety lives, and most of the open
-issues in `tasks.md` are about it:
+`WindowEnumerator` is where most of the subtlety lives (~1000 lines, untested). Read
+`analysis/code-review.md` §1 before touching it.
+
+**Summon path.** `enumerate()` serves the cached snapshot if it is < `maxSnapshotAge`
+(2.5 s) old, after `reconcile()` patches it cheaply: CGWindowList (which windows still
+exist / are on this Space), `NSRunningApplication.isHidden`, and one AX round trip to
+the frontmost app only. Only a missing/stale snapshot triggers a synchronous
+`performScan`. Background scans are driven by per-app `AXObserver`s, `NSWorkspace`
+notifications, and a 2 s safety timer (`refreshInterval`, suspended while displays
+sleep); a refresh requested during a scan re-runs afterwards rather than being dropped.
 
 - **Titles come from AX (`kAXTitleAttribute`), never `kCGWindowName`.** That is the whole
   reason the app needs only Accessibility and not Screen Recording. Reaching for
   `kCGWindowName` to fix a missing title would silently add a second permission
-  requirement — don't, without flagging it.
-- `CGWindowList` is used for window *numbers, pids, layer and order only*.
-- **Fullscreen shims**: an AX "standard" window whose `CGWindowID` is on-screen at some
-  layer but *not* at layer 0 is a macOS fullscreen helper window and is skipped. A window
-  on another Space is not on-screen at all, so it survives this test.
-- **The CGWindowList fallback** adds one representative row only for apps where AX
-  returned *no* windows (typically fullscreen apps on another Space). It must stay gated
-  on `appsWithAXWindows`, or fullscreen apps sprout phantom rows.
-- **"Apps without windows"** lists only `.regular` apps that produced no row at all from
-  either path — background agents and off-Space apps must never land there.
-- Spaces membership uses the private `_AXUIElementGetWindow` via `AXPrivate` (dlsym). If
-  the symbol disappears, every window is treated as on the current Space; preserve that
-  graceful degradation.
-- Each app gets `AXUIElementSetMessagingTimeout(axApp, 0.5)`. Lowering it makes
-  enumeration snappier but starts dropping minimized/off-Space windows; raising it lets
-  one hung app stall the whole HUD. Enumeration runs synchronously on the main thread at
-  summon time, so this timeout is the dominant term in open latency.
-- Ordering is: per-window recency stamp → app MRU → stable enumeration order.
+  requirement — don't, without flagging it. Missing titles are covered by `titleCache`
+  (plus `axCache`, `minimizedCache`), keyed by `CGWindowID` and pruned to live windows.
+- `CGWindowList` is taken with **`.optionAll`** and used for window *ids, pids, layer,
+  bounds and on-screen state only*. `.optionAll` is noisy (menu-bar strips, icon caches,
+  off-screen Chromium scratch windows), hence `CGWindowFact.isPlausibleWindow`.
+- **Fullscreen shims**: an AX "standard" window whose `CGWindowID` is on-screen but *not*
+  at layer 0 is a macOS fullscreen helper window and is skipped. A window on another
+  Space is not on-screen at all, so it survives this test.
+- **The CGWindowList fallback** runs only for apps with no AX windows (gated on
+  `appsWithAXWindows`, or fullscreen apps sprout phantom rows). It emits a row per
+  *confident* window (on-screen, or previously titled via AX); otherwise, for `.regular`
+  apps only, one `representativeWindow` (prefers display-sized = fullscreen Space).
+- `AppScan.answered` separates "AX replied with zero windows" from "AX timed out" — keep
+  them distinct; conflating them is what caused the original disappearing-app bugs.
+- **"Apps without windows"** lists only `.regular` apps that produced no row from either
+  path — background agents and off-Space apps must never land there.
+- **wicher's own windows** come from `NSApp.windows` (`cacheSelfWindows`), never AX —
+  AX only reports the active Space. Closed Preferences stays in `NSApp.windows`
+  (`isReleasedWhenClosed = false`), so filter on `isVisible || isMiniaturized`.
+- **`NSWindow.windowNumber` → `CGWindowID` must use `NSWindow.cgWindowID`**
+  (`CGWindowID(exactly:)`). The status-bar window reports 2^32 and a plain conversion
+  traps at launch.
+- Space membership: `_AXUIElementGetWindow` (private, via `AXPrivate`/dlsym) maps AX
+  windows to `CGWindowID`. If the symbol disappears, `wid` is nil and the window is
+  treated as on the current Space; preserve that graceful degradation. Minimized windows
+  and hidden apps' windows also count as current (`spaceMembership`).
+- AX timeouts: `foregroundTimeout` 0.2 s (sync summon scan, also `reconcile`) and
+  `backgroundTimeout` 1.0 s. Apps are scanned concurrently (16 at a time) with one
+  `AXUIElementCopyMultipleAttributeValues` per window. Don't move scanning back onto the
+  summon path — App Nap makes cold serial AX cost ~1 s.
+- Ordering is applied at read time in `order(_:)`: per-window recency stamp → app MRU →
+  stable enumeration order, so a cached snapshot still reflects fresh MRU.
+- Smoke test after any change here: launch the built bundle and confirm the process is
+  still alive several seconds later (past the first background refresh).
 
 ## HUD behavior details
 
@@ -108,7 +137,7 @@ issues in `tasks.md` are about it:
   panel is not yet key (during the show-delay) and dismisses on outside clicks; the
   **local** monitor handles everything once the panel is key. Both are needed.
 - A tap+release inside `showDelayMs` switches to the previous window without ever drawing
-  the panel — `beginSession` preselects index 1 for that reason.
+  the panel — `SwitcherSession` preselects index 1 (forward) for that reason.
 - Discrete presses wrap around the list; auto-repeat while held clamps at the ends.
 - Typing switches to a flat, `FuzzyMatcher`-scored list with no section headers; matched
   ranges are bolded. An app-name-only match is scored 5 lower than a title match.
