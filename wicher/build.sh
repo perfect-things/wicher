@@ -24,6 +24,13 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_PATH" "$APP/Contents/MacOS/Wicher"
 cp Info.plist "$APP/Contents/Info.plist"
+# SwiftPM stamps the binary with the deployment target as its SDK version
+# (LC_BUILD_VERSION sdk 13.0), so AppKit treats wicher as an old app and draws
+# legacy controls (mini switches, flat sidebar, auto menu icons). Record the
+# SDK it was really built against.
+SDK_VERSION="$(xcrun --show-sdk-version)"
+MIN_OS="$(otool -l "$APP/Contents/MacOS/Wicher" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; exit}')"
+vtool -set-build-version macos "$MIN_OS" "$SDK_VERSION" -replace -output "$APP/Contents/MacOS/Wicher" "$APP/Contents/MacOS/Wicher"
 # Icon: prebuilt by scripts/make-icon.sh from Resources/Wicher.icon (needs Xcode).
 cp Resources/Assets.car Resources/Wicher.icns "$APP/Contents/Resources/"
 

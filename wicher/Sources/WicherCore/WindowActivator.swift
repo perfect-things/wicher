@@ -12,7 +12,7 @@ enum WindowActivator {
     static func activate(_ info: WindowInfo) {
         let app = NSRunningApplication(processIdentifier: info.pid)
 
-        // One of our own windows (Preferences). We own it, so order it front
+        // One of our own windows (Settings). We own it, so order it front
         // directly — AX and the Dock-click reopen would both be indirections
         // around something we can simply do.
         if info.pid == ProcessInfo.processInfo.processIdentifier, !info.isAppOnly {

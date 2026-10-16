@@ -14,7 +14,7 @@ final class Settings {
     static let changeKey = "change"
 
     enum Change: String {
-        case appearance, metrics, selection, showDelay, profiles
+        case appearance, metrics, selection, showDelay, profiles, menuBarIcon
     }
 
     private let defaults: UserDefaults
@@ -29,6 +29,7 @@ final class Settings {
         static let scrollSelects = "selectOnScroll"
         static let showDelayMs = "showDelayMs"
         static let profiles = "profiles"
+        static let showMenuBarIcon = "showMenuBarIcon"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -41,6 +42,7 @@ final class Settings {
             Key.hoverSelects: true,
             Key.scrollSelects: true,
             Key.showDelayMs: 180,
+            Key.showMenuBarIcon: true,
         ])
     }
 
@@ -82,6 +84,12 @@ final class Settings {
     var showDelayMs: Int {
         get { defaults.integer(forKey: Key.showDelayMs) }
         set { defaults.set(max(0, newValue), forKey: Key.showDelayMs); post(.showDelay) }
+    }
+
+    /// Hidden, wicher keeps running; opening the app again shows Settings.
+    var showMenuBarIcon: Bool {
+        get { defaults.bool(forKey: Key.showMenuBarIcon) }
+        set { defaults.set(newValue, forKey: Key.showMenuBarIcon); post(.menuBarIcon) }
     }
 
     var profiles: [SwitcherProfile] {

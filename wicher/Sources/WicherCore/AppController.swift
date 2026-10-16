@@ -3,11 +3,11 @@ import ApplicationServices
 import Carbon.HIToolbox
 
 /// Owns the menu-bar item and wires together the hot keys, the switcher, the
-/// appearance choice, and the Preferences window.
+/// appearance choice, and the Settings window.
 final class AppController: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let switcher = SwitcherController()
-    private let preferences = PreferencesWindow()
+    private let settings = SettingsWindow()
     private var hotKeyIDs: [UInt32] = []
     private var accessibilityItem: NSMenuItem?
     private var trustTimer: Timer?
@@ -17,6 +17,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         AppearanceManager.apply(Settings.shared.appearanceMode)
         setupMainMenu()
         setupStatusItem()
+        switcher.onOpenSettings = { [weak self] in self?.settings.show() }
         SystemHotKeyOverride.shared.recoverAndInstallSignalHandlers()
         WindowEnumerator.shared.start()
         observeAppActivation()
@@ -31,16 +32,23 @@ final class AppController: NSObject, NSApplicationDelegate {
         SystemHotKeyOverride.shared.restoreAll()
     }
 
+    /// Opening Wicher while it runs (Finder, Spotlight, `open`) lands here —
+    /// the way back to Settings when the menu-bar icon is hidden.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        settings.show()
+        return false
+    }
+
     // MARK: - Main menu
 
     /// An agent app shows no menu bar, but `NSApp.mainMenu` still supplies key
-    /// equivalents to its windows. Without one, ⌘W does not close Preferences
+    /// equivalents to its windows. Without one, ⌘W does not close Settings
     /// and ⌘C/⌘V do nothing in its text fields.
     private func setupMainMenu() {
         let main = NSMenu()
 
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "Preferences…", action: #selector(openPreferences), keyEquivalent: ",")
+        appMenu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
             .target = self
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Wicher", action: #selector(quit), keyEquivalent: "q")
@@ -93,13 +101,19 @@ final class AppController: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Show", action: #selector(showSwitcher), keyEquivalent: "")
             .target = self
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Preferences…", action: #selector(openPreferences), keyEquivalent: ",")
+        menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
             .target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Wicher", action: #selector(quit), keyEquivalent: "q")
             .target = self
 
+        // A plain text menu: macOS would otherwise decorate standard-looking
+        // items such as "Settings…" with symbols.
+        if #available(macOS 27, *) {
+            menu.items.forEach { $0.preferredImageVisibility = .hidden }
+        }
         item.menu = menu
+        item.isVisible = Settings.shared.showMenuBarIcon
         statusItem = item
         updateTrustIndicator()
     }
@@ -110,7 +124,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func openPreferences() { preferences.show() }
+    @objc private func openSettings() { settings.show() }
 
     @objc private func quit() { NSApp.terminate(nil) }
 
@@ -122,6 +136,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             switch note.userInfo?[Settings.changeKey] as? Settings.Change {
             case .profiles: self?.registerHotKeys()
             case .appearance: AppearanceManager.apply(Settings.shared.appearanceMode)
+            case .menuBarIcon: self?.statusItem?.isVisible = Settings.shared.showMenuBarIcon
             default: break
             }
         }

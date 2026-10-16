@@ -21,6 +21,9 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     private var sessionScreen: NSScreen?
     private var metrics = HUDMetrics.make(iconSize: 32, textSize: 16, rowPadding: 7)
 
+    /// Called for ⌘, in the panel, after the session is cancelled.
+    var onOpenSettings: () -> Void = {}
+
     private var localMonitor: Any?
     private var globalMonitor: Any?
 
@@ -205,6 +208,13 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     }
 
     private func handleKeyDown(_ event: NSEvent) {
+        // ⌘, opens Settings. Checked before the trigger is subtracted, so with
+        // a ⌘Tab shortcut (⌘ already held) a bare "," does it.
+        if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "," {
+            cancel()
+            onOpenSettings()
+            return
+        }
         // The trigger's own modifiers are being held to keep the panel open;
         // they must not stop ⌘-held typing from searching when the shortcut
         // is ⌘Tab, nor count as Shift-Tab when the shortcut includes ⇧.

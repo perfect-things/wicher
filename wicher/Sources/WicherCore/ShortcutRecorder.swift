@@ -41,7 +41,7 @@ final class ShortcutRecorder: NSButton {
         title = combo.displayString
         target = self
         action = #selector(toggleRecording)
-        widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
+        widthAnchor.constraint(greaterThanOrEqualToConstant: 110).isActive = true
         toolTip = "Click, then press the new shortcut. Esc cancels."
     }
 

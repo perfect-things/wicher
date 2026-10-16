@@ -657,7 +657,7 @@ final class WindowEnumerator {
     ///
     /// Asking the Accessibility API about our own process is both wasteful and
     /// unreliable: AX reports an app's windows on the *active* Space, so
-    /// Preferences vanished from the list whenever you switched away from the
+    /// Settings vanished from the list whenever you switched away from the
     /// Space it was open on. In-process there is no such limit — `NSApp.windows`
     /// is every window we own, wherever it lives — and `windowNumber` is the
     /// same identifier CGWindowList uses, so Space membership still resolves.
@@ -668,7 +668,7 @@ final class WindowEnumerator {
             guard let number = window.cgWindowID,
                   !(window is SwitcherPanel),            // the borderless HUD
                   !window.title.isEmpty,
-                  // Preferences is kept alive after closing
+                  // Settings is kept alive after closing
                   // (`isReleasedWhenClosed = false`), so it stays in
                   // `NSApp.windows` and must be filtered out by visibility. A
                   // window on another Space is still "visible"; a minimized one
@@ -712,7 +712,7 @@ final class WindowEnumerator {
     /// Window enumeration on macOS is mostly undocumented behavior, and the
     /// interesting cases (a hidden app, a full-screen app on another Space) are
     /// exactly the ones that cannot be reproduced from a shell. This is how to
-    /// see the ground truth on a real machine: Preferences → General → Copy Diagnostics.
+    /// see the ground truth on a real machine: Settings → General → Copy Diagnostics.
     func diagnosticsReport() -> String {
         var out = ""
         out += "wicher diagnostics — \(Date())\n"

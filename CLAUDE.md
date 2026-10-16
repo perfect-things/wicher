@@ -34,6 +34,11 @@ App icon: `wicher/Resources/Wicher.icon` (Icon Composer; light/dark/tinted/clear
 committed `Resources/Assets.car` (macOS 26+), `Resources/Wicher.icns` (older macOS) and
 previews; `build.sh` only copies them, so CLT-only builds still work.
 
+`build.sh` also rewrites the binary's `LC_BUILD_VERSION` SDK field with `vtool`:
+SwiftPM stamps it with the deployment target (13.0), and AppKit then draws legacy
+controls (mini switches, flat sidebar, automatic menu icons) as if wicher were an old app.
+`swift test` binaries keep the old stamp, so offscreen snapshots show the legacy look.
+
 `swift build` alone compiles but produces a bare binary, not the `LSUIElement` bundle —
 hot keys and the HUD need the assembled `.app`.
 
@@ -43,7 +48,7 @@ in `Tests/WicherCoreTests` use `@testable import WicherCore` and cover the pure 
 `WindowAssembly` (the scan → rows classification), `WindowGrouping`, `FuzzyMatcher`,
 `HUDMetrics`, `SwitcherSession` (incl. live updates), `HotKeyCombo`, `Settings` (via
 `Settings(defaults:)` on a test suite) — plus `SwitcherListView` layout rendered
-offscreen. Fixtures are hand-built (`axWindow: nil`; `AXUIElementCreateApplication` is
+offscreen, and the Settings window's panes. Fixtures are hand-built (`axWindow: nil`; `AXUIElementCreateApplication` is
 fine where an element is required — it does no IPC). The AX/CGWindowList *collection*,
 hot keys, activation and the live HUD have no tests; verify those by building the app,
 granting Accessibility, and exercising ⌥Tab. Set `WICHER_SNAPSHOT_DIR` when running
@@ -62,7 +67,9 @@ Accessibility is the fix when the HUD suddenly lists nothing (it also shows a no
 AppKit + Carbon + Accessibility + CoreGraphics, no third-party dependencies, no
 database. Flow of one switch:
 
-1. **`AppController`** (app delegate) — menu-bar item, Accessibility prompt, and one
+1. **`AppController`** (app delegate) — menu-bar item (hideable: `Settings.showMenuBarIcon`;
+   reopening the app — `applicationShouldHandleReopen` — and ⌘, in the panel open
+   Settings instead), Accessibility prompt, and one
    Carbon hot key *pair* per profile (the combo, plus combo+Shift for reverse — none if
    the combo already has Shift). It also
    subscribes to `NSWorkspace.didActivateApplicationNotification` to feed MRU.
@@ -77,7 +84,7 @@ database. Flow of one switch:
      SIGTERM/SIGINT/SIGHUP, or when no shortcut claims them, and on launch re-enables
      whatever a crashed run left off. Never disable a system hot key without going
      through it.
-   - **`ShortcutRecorder`** (Preferences) captures any chord: it suspends wicher's hot
+   - **`ShortcutRecorder`** (Settings → Switchers) captures any chord: it suspends wicher's hot
      keys and, for the duration of a recording, pauses global hot keys twice over:
      public `PushSymbolicHotKeyMode(kHIHotKeyModeAllDisabled)` (no-op without
      Accessibility trust) and private `CGSSetGlobalHotKeyOperatingMode` (connection-scoped,
@@ -97,7 +104,7 @@ database. Flow of one switch:
    Never before the panel is shown — a quick tap must commit the preselected window.
 4. **`WindowEnumerator`** (singleton) — *collects* AX + CGWindowList input, keeps a
    background snapshot fresh via AX observers, owns the caches and MRU, and produces the
-   **Copy Diagnostics** dump (`diagnosticsReport()`, Preferences → General). The decision of which rows
+   **Copy Diagnostics** dump (`diagnosticsReport()`, Settings → General). The decision of which rows
    exist is **`WindowAssembly.assemble`** — pure, tested; put classification changes
    there, with a test.
 5. **`WindowGrouping`** — pure function: `(profile, Enumeration, activePID) → [WindowSection]`.
@@ -106,6 +113,11 @@ database. Flow of one switch:
 6. **`WindowActivator`** — activate, then raise; a minimized window is un-minimized by
    `DeminiaturizeWaiter`, which raises on `kAXWindowDeminiaturizedNotification` (0.6 s
    timeout). App-only entries get a Dock-click-equivalent reopen.
+
+Settings window: `SettingsWindow` (AppKit window + `NSSplitViewController`, sidebar
+item) hosting SwiftUI panes (`SettingsViews`: grouped `Form`s) over `SettingsModel`,
+which binds straight to `Settings.shared` and re-renders on `Settings.didChange` — no
+copies to drift. `ShortcutRecorder` stays AppKit, wrapped in an `NSViewRepresentable`.
 
 Config: `Settings` (UserDefaults; globals) + `SwitcherProfile` (Codable, JSON-encoded
 into UserDefaults, decoded once and cached; per-switcher scope/Spaces/placement +
@@ -164,7 +176,7 @@ sleep); a refresh requested during a scan re-runs afterwards rather than being d
 - **"Apps without windows"** lists only `.regular` apps that produced no row from either
   path — background agents and off-Space apps must never land there.
 - **wicher's own windows** come from `NSApp.windows` (`cacheSelfWindows`), never AX —
-  AX only reports the active Space. Closed Preferences stays in `NSApp.windows`
+  AX only reports the active Space. Closed Settings stays in `NSApp.windows`
   (`isReleasedWhenClosed = false`), so filter on `isVisible || isMiniaturized`.
 - **`NSWindow.windowNumber` → `CGWindowID` must use `NSWindow.cgWindowID`**
   (`CGWindowID(exactly:)`). The status-bar window reports 2^32 and a plain conversion

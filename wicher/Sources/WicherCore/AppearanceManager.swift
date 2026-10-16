@@ -19,7 +19,7 @@ enum AppearanceMode: Int, CaseIterable {
 ///
 /// This is wicher's headline improvement over Contexts, whose settings window
 /// (observed) offers no appearance control. Setting `NSApp.appearance` cascades
-/// to every window — the switcher HUD and the Preferences window alike.
+/// to every window — the switcher HUD and the Settings window alike.
 enum AppearanceManager {
     static func apply(_ mode: AppearanceMode) {
         switch mode {
