@@ -40,10 +40,13 @@ hand-built `WindowInfo`/`Enumeration` fixtures (`axWindow: nil`). Enumeration, A
 hot keys and the HUD itself have no tests; verify those by building the app, granting
 Accessibility, and exercising ⌥Tab.
 
-Because the app is ad-hoc signed, its cdhash changes on every rebuild, so macOS
-re-prompts for Accessibility access after each `./build.sh`. Toggling Wicher off/on in
-System Settings → Privacy & Security → Accessibility is the usual fix when the HUD
-suddenly lists nothing.
+Signing: `build.sh` signs with the "Wicher Development" identity (override with
+`WICHER_SIGN_IDENTITY`) when it exists, else ad-hoc. Create it once with
+`wicher/scripts/make-signing-identity.sh` (self-signed, login keychain). With it, the
+designated requirement is `certificate leaf = H"…"`, stable across rebuilds, so the
+Accessibility grant survives. Ad-hoc signing changes the cdhash every build and macOS
+re-prompts; toggling Wicher off/on in System Settings → Privacy & Security →
+Accessibility is the fix when the HUD suddenly lists nothing (it also shows a notice).
 
 ## Architecture
 

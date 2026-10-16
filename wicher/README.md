@@ -55,8 +55,10 @@ Grant **System Settings → Privacy & Security → Accessibility → Wicher**, t
 relaunch. Press **⌥Tab**.
 
 Requires macOS 13+ and an installed Swift toolchain (Xcode or Command Line
-Tools). Development only: the app is **ad-hoc signed**, so macOS may re-ask for
-Accessibility access after each rebuild (the signature's cdhash changes).
+Tools). Development only: without a signing identity the app is **ad-hoc
+signed**, so macOS re-asks for Accessibility access after each rebuild. Run
+`scripts/make-signing-identity.sh` once to create a local self-signed identity;
+`build.sh` then signs with it and the grant survives rebuilds.
 
 ## Scope & known limitations
 

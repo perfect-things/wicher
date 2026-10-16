@@ -25,10 +25,18 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_PATH" "$APP/Contents/MacOS/Wicher"
 cp Info.plist "$APP/Contents/Info.plist"
 
-echo "▸ Ad-hoc code signing…"
-# Ad-hoc signature (identity "-"). Note: the signature's cdhash changes on each
-# rebuild, so macOS may re-prompt for Accessibility access after rebuilding.
-codesign --force --sign - "$APP" >/dev/null 2>&1 || codesign --force --sign - "$APP"
+# Sign with a stable identity when one exists, so the Accessibility grant
+# survives rebuilds (see scripts/make-signing-identity.sh). Otherwise fall back
+# to an ad-hoc signature, whose cdhash changes on every build — macOS then
+# re-prompts for Accessibility after each one.
+IDENTITY="${WICHER_SIGN_IDENTITY:-Wicher Development}"
+if security find-certificate -c "$IDENTITY" >/dev/null 2>&1; then
+  echo "▸ Code signing with \"$IDENTITY\"…"
+  codesign --force --sign "$IDENTITY" "$APP"
+else
+  echo "▸ Ad-hoc code signing (run scripts/make-signing-identity.sh for a stable identity)…"
+  codesign --force --sign - "$APP"
+fi
 
 echo "✓ Built $PWD/$APP"
 echo "  Launch it, grant Accessibility access when prompted, then press ⌥Tab."
