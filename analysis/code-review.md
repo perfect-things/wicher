@@ -87,6 +87,24 @@ indistinguishable at the call site.
 MRU ordering was moved out of the scan and into `order(_:)` at read time, so a cached
 snapshot still reflects the newest recency stamps.
 
+A cache introduces its own failure mode, and it showed up immediately: close,
+minimize or hide a window and summon the panel within the cache window, and you saw
+the state you had just left. `reconcile(_:)` closes that gap on every summon, for a
+few milliseconds, by refreshing everything that can be known *without* cross-process
+IPC — CGWindowList says which windows still exist and which are on this Space,
+`NSRunningApplication` says which apps are hidden — and then re-reading, via AX, only
+the frontmost app, which is the one you just acted on and is awake by definition.
+Two supporting fixes: `runRefresh` used to *drop* a refresh request that arrived
+while a scan was in flight (exactly when a notification matters most), and it now
+re-runs instead; and `AppScan` distinguishes "AX replied" from "AX replied with
+windows", so an app that has genuinely closed its last window is told apart from one
+that timed out.
+
+Worth noting for later: `kAXUIElementDestroyedNotification` is registered on the
+*application* element, where it signals the app's own destruction rather than its
+windows'. Per-window registration is the usual remedy; the CGWindowList pruning in
+`reconcile` makes it a background-freshness concern rather than a visible one.
+
 **Trade-off, stated plainly:** the 2 s refresh keeps every app's AX connection warm,
 which is what makes the panel instant, but it does prevent those apps from napping as
 deeply. Refreshes are suspended while the display sleeps. If battery impact shows up,
@@ -109,7 +127,30 @@ therefore treated as "not on the current Space" and vanished under the
 "Visible Spaces" filter. `spaceMembership(wid:minimized:hidden:currentSpace:)` now
 counts it as current, which is what a user expects.
 
-### 1.6 Verifying this on a real machine
+### 1.6 wicher's own windows were asked about through AX
+
+Preferences only appeared in the panel while you were on the Space it was open on.
+The cause was asking the Accessibility API about our *own* process: AX reports an
+app's windows on the active Space, so from anywhere else wicher had no windows to
+report, and the CGWindowList fallback did not apply because it was gated on
+`.regular` apps — wicher is `LSUIElement`, so `.accessory`.
+
+There is no reason to use AX here at all. `NSApp.windows` is every window the process
+owns, wherever it lives, with `title`, `isMiniaturized` and a `windowNumber` that is
+the same identifier CGWindowList uses, so Space membership still resolves.
+`cacheSelfWindows()` reads it on the main thread; `WindowActivator` orders our own
+windows front directly rather than going out through AX or a Dock-click reopen. One
+wrinkle worth remembering: `PreferencesWindow` sets `isReleasedWhenClosed = false`,
+so a *closed* Preferences window stays in `NSApp.windows` and has to be filtered out
+by `isVisible || isMiniaturized`.
+
+The same gating hid other agent apps' windows, so the CGWindowList fallback now
+applies to non-`.regular` apps too — but only for windows it is confident about (on
+screen now, or previously titled through AX). Guessing a stand-in row from an
+off-screen window stays limited to Dock apps, since an agent app's off-screen
+layer-0 window is far more likely to be chrome than a real window.
+
+### 1.7 Verifying this on a real machine
 
 The interesting cases cannot be reproduced from a shell: a process without
 Accessibility trust gets `kAXErrorAPIDisabled` for everything, and full-screen Spaces

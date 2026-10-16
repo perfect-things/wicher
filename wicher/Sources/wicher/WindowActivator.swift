@@ -12,6 +12,21 @@ enum WindowActivator {
     static func activate(_ info: WindowInfo) {
         let app = NSRunningApplication(processIdentifier: info.pid)
 
+        // One of our own windows (Preferences). We own it, so order it front
+        // directly — AX and the Dock-click reopen would both be indirections
+        // around something we can simply do.
+        if info.pid == ProcessInfo.processInfo.processIdentifier, !info.isAppOnly {
+            if let window = NSApp.windows.first(where: { CGWindowID($0.windowNumber) == info.cgWindowID }) {
+                if window.isMiniaturized { window.deminiaturize(nil) }
+                NSApp.activate(ignoringOtherApps: true)
+                window.makeKeyAndOrderFront(nil)
+                if let wid = info.cgWindowID {
+                    WindowEnumerator.shared.noteActivatedWindow(wid, pid: info.pid)
+                }
+                return
+            }
+        }
+
         if let axWindow = info.axWindow, !info.isAppOnly {
             // Activate the owning app first; some apps won't honor an
             // un-minimize/raise on a background process.
