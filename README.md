@@ -34,7 +34,8 @@ full **Light / Dark / System** appearance support.
 
 ## Design goals
 
-- **Small & fast.** Pure AppKit + Carbon + Accessibility + CoreGraphics. No
+- **Small & fast.** AppKit (+ SwiftUI for Settings) + Carbon + Accessibility +
+  CoreGraphics. No
   bundled database, no WebKit — recency is kept in memory, settings in
   `UserDefaults`.
 - **Minimal permissions.** Needs only **Accessibility** — window titles are read
@@ -97,7 +98,7 @@ Sources/WicherCore/                everything else (a library, so it is testable
   HUDMetrics.swift        icon/text/padding sliders → every pixel dimension
   HotKey.swift            Carbon RegisterEventHotKey wrapper + key-code names
   SystemHotKeys.swift     find/disable/restore system shortcuts a switcher claims
-  ShortcutRecorder.swift  AppKit control that records a chord
+  ShortcutRecorder.swift  records a chord for the Settings shortcut button
   AXPrivate.swift         _AXUIElementGetWindow (Space correlation, with fallback)
   WindowInfo.swift        window / app-only model + stable WindowKey
   WindowEnumerator.swift  AX + CGWindowList collection, snapshot, observers, MRU

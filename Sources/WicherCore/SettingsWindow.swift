@@ -53,6 +53,11 @@ final class SettingsWindow: NSObject {
         win.center()
         win.setFrameAutosaveName("WicherSettings")
 
+        // The sidebar and the pane are separate hosting views; without this the
+        // key-view loop is the one computed for the first pane shown, and Tab
+        // skips controls or can't get back to the sidebar on the others.
+        win.autorecalculatesKeyViewLoop = true
+
         paneObserver = model.$pane.sink { [weak win] pane in win?.title = pane.title }
         window = win
     }

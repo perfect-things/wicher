@@ -1,7 +1,7 @@
 import AppKit
 import Carbon.HIToolbox
 
-/// A button that shows a shortcut and, when clicked, records a new one.
+/// Records a new shortcut for `ShortcutField`, the button that shows it.
 ///
 /// While recording it captures *any* chord, including ones the system or
 /// wicher itself would normally take first:
@@ -14,7 +14,10 @@ import Carbon.HIToolbox
 /// Held modifiers are shown live. Esc, a click elsewhere, or the window losing
 /// focus cancels; a chord `validate` rejects shows the reason and keeps
 /// recording.
-final class ShortcutRecorder: NSButton {
+///
+/// A model, not an `NSButton`: the button itself is SwiftUI, so it takes part
+/// in the Form's keyboard focus like the controls around it.
+final class ShortcutRecorder: ObservableObject {
     var combo: HotKeyCombo {
         didSet { if !isRecording { title = combo.displayString } }
     }
@@ -25,43 +28,37 @@ final class ShortcutRecorder: NSButton {
     /// Called when recording starts (true) and ends (false).
     var onRecordingChanged: (Bool) -> Void = { _ in }
 
-    private(set) var isRecording = false
+    @Published private(set) var title: String
+    @Published private(set) var isRecording = false
     private var monitor: Any?
     private var symbolicModeToken: UnsafeMutableRawPointer?
     private var resignObserver: NSObjectProtocol?
     private var messageWork: DispatchWorkItem?
+    /// The click that cancelled recording. If it was on the button, its
+    /// mouse-up then toggles, and must not start recording again.
+    private var cancellingClick: Int?
 
     private static let prompt = "Type shortcut…"
 
     init(combo: HotKeyCombo) {
         self.combo = combo
-        super.init(frame: .zero)
-        bezelStyle = .rounded
-        setButtonType(.pushOnPushOff)
         title = combo.displayString
-        target = self
-        action = #selector(toggleRecording)
-        widthAnchor.constraint(greaterThanOrEqualToConstant: 110).isActive = true
-        toolTip = "Click, then press the new shortcut. Esc cancels."
     }
 
-    required init?(coder: NSCoder) { preconditionFailure("not used") }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        if window == nil { stopRecording() }   // card rebuilt or window gone
-    }
+    deinit { stopRecording() }
 
     // MARK: - Recording
 
-    @objc private func toggleRecording() {
-        isRecording ? stopRecording() : startRecording()
+    func toggleRecording() {
+        if isRecording { return stopRecording() }
+        if let event = NSApp.currentEvent, event.type == .leftMouseUp,
+           event.eventNumber == cancellingClick { return }
+        startRecording()
     }
 
     private func startRecording() {
-        guard !isRecording, let window else { return }
+        guard !isRecording, let window = NSApp.keyWindow else { return }
         isRecording = true
-        state = .on
         title = Self.prompt
 
         HotKeyCenter.shared.suspend()
@@ -79,7 +76,7 @@ final class ShortcutRecorder: NSButton {
         ) { [weak self] _ in self?.stopRecording() }
     }
 
-    private func stopRecording() {
+    func stopRecording() {
         guard isRecording else { return }
         isRecording = false
         if let monitor { NSEvent.removeMonitor(monitor) }
@@ -92,7 +89,6 @@ final class ShortcutRecorder: NSButton {
         HotKeyCenter.shared.resume()
         onRecordingChanged(false)
         messageWork?.cancel()
-        state = .off
         title = combo.displayString
     }
 
@@ -120,10 +116,9 @@ final class ShortcutRecorder: NSButton {
             title = held.isEmpty ? Self.prompt : held + "…"
             return event
         default:
-            // A click on this button toggles via its action; anywhere else cancels.
-            let inside = event.window === window
-                && bounds.contains(convert(event.locationInWindow, from: nil))
-            if !inside { stopRecording() }
+            // Any click cancels, the button's own included.
+            cancellingClick = event.eventNumber
+            stopRecording()
             return event
         }
     }

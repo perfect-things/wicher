@@ -228,27 +228,38 @@ private struct ProfileRows: View {
     }
 }
 
-/// The AppKit `ShortcutRecorder` (which suspends hot keys while recording)
-/// inside a SwiftUI row.
-private struct ShortcutField: NSViewRepresentable {
+/// The shortcut button: shows the combo, records a new one when pressed
+/// (click, or Space with keyboard navigation). Recording is `ShortcutRecorder`.
+private struct ShortcutField: View {
     var combo: HotKeyCombo
     var validate: (HotKeyCombo) -> String?
     var onChange: (HotKeyCombo) -> Void
     var onRecordingChanged: (Bool) -> Void
+    @StateObject private var recorder: ShortcutRecorder
 
-    func makeNSView(context: Context) -> ShortcutRecorder {
-        let recorder = ShortcutRecorder(combo: combo)
-        recorder.setContentHuggingPriority(.required, for: .horizontal)
-        wire(recorder)
-        return recorder
+    init(combo: HotKeyCombo, validate: @escaping (HotKeyCombo) -> String?,
+         onChange: @escaping (HotKeyCombo) -> Void, onRecordingChanged: @escaping (Bool) -> Void) {
+        self.combo = combo
+        self.validate = validate
+        self.onChange = onChange
+        self.onRecordingChanged = onRecordingChanged
+        _recorder = StateObject(wrappedValue: ShortcutRecorder(combo: combo))
     }
 
-    func updateNSView(_ recorder: ShortcutRecorder, context: Context) {
-        wire(recorder)
-        if !recorder.isRecording, recorder.combo != combo { recorder.combo = combo }
+    var body: some View {
+        let _ = wire()
+        Group {
+            let button = Button(action: recorder.toggleRecording) {
+                Text(recorder.title).frame(minWidth: 96)
+            }
+            if recorder.isRecording { button.buttonStyle(.borderedProminent) } else { button.buttonStyle(.bordered) }
+        }
+        .help("Click, then press the new shortcut. Esc cancels.")
+        .onChange(of: combo) { if !recorder.isRecording { recorder.combo = $0 } }
+        .onDisappear(perform: recorder.stopRecording)   // card removed or window closed
     }
 
-    private func wire(_ recorder: ShortcutRecorder) {
+    private func wire() {
         recorder.validate = validate
         recorder.onChange = onChange
         recorder.onRecordingChanged = onRecordingChanged

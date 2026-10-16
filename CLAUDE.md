@@ -112,7 +112,10 @@ database. Flow of one switch:
 Settings window: `SettingsWindow` (AppKit window + `NSSplitViewController`, sidebar
 of General / Appearance / Switchers / About) hosting SwiftUI panes (`SettingsViews`: grouped `Form`s) over `SettingsModel`,
 which binds straight to `Settings.shared` and re-renders on `Settings.didChange` — no
-copies to drift. `ShortcutRecorder` stays AppKit, wrapped in an `NSViewRepresentable`.
+copies to drift. The shortcut button is a SwiftUI `Button` over the `ShortcutRecorder` model.
+The window sets `autorecalculatesKeyViewLoop`: the sidebar and the pane are separate hosting
+views, and without it AppKit's key-view loop is computed for the first pane only — on the
+others Tab/Shift-Tab skipped controls or never got back to the sidebar.
 
 Config: `Settings` (UserDefaults; globals) + `SwitcherProfile` (Codable, JSON-encoded
 into UserDefaults, decoded once and cached; per-switcher scope/Spaces/placement +
