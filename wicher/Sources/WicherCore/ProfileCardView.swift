@@ -21,14 +21,14 @@ final class ProfileCardView: NSView {
     let profileID: UUID
     weak var delegate: ProfileCardDelegate?
 
-    private let shortcutButton = NSButton(title: "", target: nil, action: nil)
-    private var recordingMonitor: Any?
-    private var currentCombo: HotKeyCombo
+    private let shortcutRecorder: ShortcutRecorder
+    /// Says which macOS shortcut this one stands in for, when it does.
+    private let systemNote = NSTextField(wrappingLabelWithString: "")
 
     init(profile: SwitcherProfile, isRemovable: Bool, delegate: ProfileCardDelegate) {
         self.profileID = profile.id
         self.delegate = delegate
-        self.currentCombo = profile.combo
+        self.shortcutRecorder = ShortcutRecorder(combo: profile.combo)
         super.init(frame: .zero)
 
         wantsLayer = true
@@ -49,11 +49,23 @@ final class ProfileCardView: NSView {
             stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -14),
         ])
 
-        shortcutButton.title = currentCombo.displayString
-        shortcutButton.bezelStyle = .rounded
-        shortcutButton.target = self
-        shortcutButton.action = #selector(startRecording)
-        stack.addArrangedSubview(row("Shortcut:", shortcutButton))
+        shortcutRecorder.validate = { [weak self] combo in
+            guard let self else { return nil }
+            return self.delegate?.card(self.profileID, problemWithShortcut: combo)
+        }
+        shortcutRecorder.onChange = { [weak self] combo in
+            guard let self else { return }
+            self.delegate?.card(self.profileID, didSetShortcut: combo)
+            self.updateSystemNote()
+        }
+        stack.addArrangedSubview(row("Shortcut:", shortcutRecorder))
+
+        systemNote.font = .systemFont(ofSize: 11)
+        systemNote.textColor = .secondaryLabelColor
+        systemNote.widthAnchor.constraint(equalToConstant: 300).isActive = true
+        let noteRow = row("", systemNote)
+        stack.addArrangedSubview(noteRow)
+        updateSystemNote()
 
         stack.addArrangedSubview(row("Show windows of:",
             seg(WindowScope.allCases.map { $0.title }, profile.scope.rawValue, #selector(scopeChanged(_:)))))
@@ -103,38 +115,21 @@ final class ProfileCardView: NSView {
     }
     @objc private func removeTapped() { delegate?.cardDidRequestRemove(profileID) }
 
-    @objc private func startRecording() {
-        shortcutButton.title = "Press keys…"
-        recordingMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
-            self?.finishRecording(with: event)
-            return nil
+    private func updateSystemNote() {
+        let combo = shortcutRecorder.combo
+        var notes: [String] = []
+        if let name = SystemHotKeyOverride.shared.overriddenShortcut(for: combo) {
+            notes.append("Replaces \(name) while Wicher is running.")
         }
-    }
-
-    private func finishRecording(with event: NSEvent) {
-        if let recordingMonitor { NSEvent.removeMonitor(recordingMonitor) }
-        recordingMonitor = nil
-        if Int(event.keyCode) == kVK_Escape {
-            shortcutButton.title = currentCombo.displayString
-            return
+        if let reverse = combo.reverse {
+            notes.append("\(reverse.displayString) cycles backwards.")
+        } else {
+            notes.append("Includes ⇧, so there is no reverse shortcut — use ↑ in the panel.")
         }
-        var mods: UInt32 = 0
-        if event.modifierFlags.contains(.command) { mods |= UInt32(cmdKey) }
-        if event.modifierFlags.contains(.option) { mods |= UInt32(optionKey) }
-        if event.modifierFlags.contains(.shift) { mods |= UInt32(shiftKey) }
-        if event.modifierFlags.contains(.control) { mods |= UInt32(controlKey) }
-        let combo = HotKeyCombo(keyCode: UInt32(event.keyCode), carbonModifiers: mods)
-        if let problem = delegate?.card(profileID, problemWithShortcut: combo) {
-            shortcutButton.title = problem
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                guard let self, self.recordingMonitor == nil else { return }
-                self.shortcutButton.title = self.currentCombo.displayString
-            }
-            return
+        if combo.eventModifierFlags.isEmpty {
+            notes.append("No modifier to release: press ↩ or click to switch.")
         }
-        currentCombo = combo
-        shortcutButton.title = currentCombo.displayString
-        delegate?.card(profileID, didSetShortcut: currentCombo)
+        systemNote.stringValue = notes.joined(separator: " ")
     }
 
     // MARK: - Layout helpers

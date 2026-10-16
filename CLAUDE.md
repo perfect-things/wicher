@@ -58,11 +58,24 @@ AppKit + Carbon + Accessibility + CoreGraphics, no third-party dependencies, no
 database. Flow of one switch:
 
 1. **`AppController`** (app delegate) — menu-bar item, Accessibility prompt, and one
-   Carbon hot key *pair* per profile (the combo, plus combo+Shift for reverse). It also
+   Carbon hot key *pair* per profile (the combo, plus combo+Shift for reverse — none if
+   the combo already has Shift). It also
    subscribes to `NSWorkspace.didActivateApplicationNotification` to feed MRU.
 2. **`HotKeyCenter`** — `RegisterEventHotKey` wrapper that reports **press and release**.
-   Release is what drives commit-on-modifier-release; there is deliberately no event tap,
-   which is why wicher cannot (and must not try to) intercept system ⌘Tab.
+   Release is what drives commit-on-modifier-release. There is deliberately **no event
+   tap**. `suspend()`/`resume()` take every hot key off while a shortcut is recorded.
+   - **System chords (⌘Tab, ⌘`, Spotlight…)**: `SystemHotKeys` finds enabled system
+     ("symbolic") hot keys with the same chord via private `CGSGetSymbolicHotKeyValue` /
+     `CGSIsSymbolicHotKeyEnabled` / `CGSSetSymbolicHotKeyEnabled` (dlsym; absent → no
+     override, the shortcut just doesn't fire). `SystemHotKeyOverride` switches exactly
+     those off while wicher runs, **persists their ids first**, re-enables them on quit,
+     SIGTERM/SIGINT/SIGHUP, or when no shortcut claims them, and on launch re-enables
+     whatever a crashed run left off. Never disable a system hot key without going
+     through it.
+   - **`ShortcutRecorder`** (Preferences) captures any chord: it suspends wicher's hot
+     keys and uses public `PushSymbolicHotKeyMode(kHIHotKeyModeAllDisabled)` for the
+     duration of a recording. Validation is `HotKeyCombo.problem(amongOthers:)`: only bare
+     typing keys and chords another switcher uses (incl. its reverse) are refused.
 3. **`SwitcherController`** — session lifecycle and wiring: show-delay, hold-to-repeat,
    event monitors, panel placement, commit. It drives two pieces:
    - **`SwitcherSession`** — value-type model of one session: rows for the current query
@@ -89,9 +102,10 @@ database. Flow of one switch:
 Config: `Settings` (UserDefaults; globals) + `SwitcherProfile` (Codable, JSON-encoded
 into UserDefaults, decoded once and cached; per-switcher scope/Spaces/placement +
 shortcut). Every setter posts `Settings.didChange` with a `Settings.Change`;
-`AppController` re-registers hot keys on `.profiles` and applies `.appearance`. Shift is
-reserved for reverse cycling: the recorder rejects it and `HotKeyCombo.reverse` is nil
-for a combo that has it.
+`AppController` re-registers hot keys (and re-applies the system override) on
+`.profiles` and applies `.appearance`. `HotKeyCombo.reverse` is nil for a combo with
+Shift. In the panel, `handleKeyDown` subtracts the trigger's modifiers, so ⌘-held typing
+searches when the shortcut is ⌘Tab.
 `HUDMetrics.make(iconSize:textSize:rowPadding:)` derives every pixel dimension — don't
 hardcode row heights or panel widths elsewhere.
 

@@ -69,10 +69,14 @@ signed**, so macOS re-asks for Accessibility access after each rebuild. Run
   unavailable the filter degrades safely (every window is treated as current).
 - MRU ordering is per window for windows wicher has seen come to the front,
   falling back to application order for the rest.
-- Hot keys use a non-conflicting default (⌥Tab); wicher does **not** intercept
-  the system ⌘-Tab (that would need an always-on event tap).
+- The default shortcut is ⌥Tab, but any chord can be recorded — including ⌘Tab.
+  A shortcut that macOS itself uses (⌘Tab, ⌘`, Spotlight…) replaces the system
+  one while wicher runs (via a private CoreGraphics call); the system shortcut
+  comes back when wicher quits or the shortcut changes.
 - Reverse cycling for a profile is its shortcut **plus Shift** (not separately
-  editable), so a shortcut cannot itself contain Shift.
+  editable). A shortcut that already contains Shift has no reverse; use ↑.
+- A bare key with no modifier is accepted only for function keys (F1–F20);
+  without a modifier to release, press ↩ or click to switch.
 
 ## Layout
 

@@ -17,12 +17,18 @@ final class AppController: NSObject, NSApplicationDelegate {
         AppearanceManager.apply(Settings.shared.appearanceMode)
         setupMainMenu()
         setupStatusItem()
+        SystemHotKeyOverride.shared.recoverAndInstallSignalHandlers()
         WindowEnumerator.shared.start()
         observeAppActivation()
         observeSettings()
         registerHotKeys()
         promptForAccessibilityIfNeeded()
         watchAccessibilityTrust()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // Give ⌘Tab (or whatever a shortcut stood in for) back to the system.
+        SystemHotKeyOverride.shared.restoreAll()
     }
 
     // MARK: - Main menu
@@ -127,14 +133,18 @@ final class AppController: NSObject, NSApplicationDelegate {
         hotKeyIDs.forEach { HotKeyCenter.shared.unregister($0) }
         hotKeyIDs.removeAll()
 
-        for profile in Settings.shared.profiles {
+        // A shortcut the system owns (⌘Tab) only reaches us once the system's
+        // own hot key is switched off; see `SystemHotKeys`.
+        let profiles = Settings.shared.profiles
+        SystemHotKeyOverride.shared.apply(for: profiles.flatMap { [$0.combo] + ($0.combo.reverse.map { [$0] } ?? []) })
+
+        for profile in profiles {
             if let id = HotKeyCenter.shared.register(profile.combo, handler: { [weak self] pressed in
                 self?.switcher.hotKey(profile: profile, forward: true, pressed: pressed)
             }) {
                 hotKeyIDs.append(id)
             }
-            // A combo that already holds Shift has no distinct reverse chord
-            // (the recorder rejects those; this guards older saved profiles).
+            // A combo that already holds Shift has no distinct reverse chord.
             guard let reverse = profile.combo.reverse else { continue }
             if let id = HotKeyCenter.shared.register(reverse, handler: { [weak self] pressed in
                 self?.switcher.hotKey(profile: profile, forward: false, pressed: pressed)

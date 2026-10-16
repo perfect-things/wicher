@@ -205,7 +205,11 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     }
 
     private func handleKeyDown(_ event: NSEvent) {
-        let mods = event.modifierFlags
+        // The trigger's own modifiers are being held to keep the panel open;
+        // they must not stop ⌘-held typing from searching when the shortcut
+        // is ⌘Tab, nor count as Shift-Tab when the shortcut includes ⇧.
+        let trigger = session?.profile.combo.eventModifierFlags ?? []
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(trigger)
         switch Int(event.keyCode) {
         case kVK_Escape:
             cancel()
