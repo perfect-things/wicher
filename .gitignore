@@ -1,2 +1,10 @@
 .DS_Store
+
+# SwiftPM / Xcode build output
 .build/
+.swiftpm/
+DerivedData/
+*.xcodeproj/xcuserdata/
+
+# Built app bundle (scripts/build.sh)
+Wicher.app/

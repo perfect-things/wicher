@@ -4,29 +4,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository shape
 
-- `wicher/` — the Swift package and app. **All source work happens here.**
-  - `scripts/` — every shell script: `build.sh`, `make-icon.sh`,
-    `make-signing-identity.sh`. Each `cd`s to the package root itself, so they run from
-    anywhere.
-  - `README.md` — user-facing overview, build steps and source layout. Keep its Layout
-    section in sync when adding/removing source files.
+The repo root is the Swift package (`Package.swift`, `Sources/`, `Tests/`, `Resources/`,
+`Info.plist`).
+
+- `scripts/` — every shell script: `build.sh`, `make-icon.sh`,
+  `make-signing-identity.sh`. Each `cd`s to the repo root itself, so they run from
+  anywhere.
+- `README.md` — user-facing overview, build steps and source layout. Keep its Layout
+  section in sync when adding/removing source files.
 - `.mcp.json` / `.claude/skills/reverse-engineer-anything` — the REA setup the original
   research on Contexts.app was done with (which macOS mechanisms a window switcher
   uses). wicher is a clean reimplementation: no Contexts code, class names, icon, or
   settings layout. Keep it that way.
 
-The built `wicher/Wicher.app` is committed, so every rebuild shows up in `git status`.
+`Wicher.app` (built by `scripts/build.sh` at the root) and `.build/` are gitignored —
+never commit build products. History was rewritten once to purge old `.app` copies.
 
 ## Build & run
 
 ```sh
-wicher/scripts/build.sh      # swift build -c release + assemble + sign Wicher.app
-open wicher/Wicher.app       # first launch prompts for Accessibility
-cd wicher && swift test      # unit tests (WicherCoreTests)
+scripts/build.sh      # swift build -c release + assemble + sign Wicher.app
+open Wicher.app       # first launch prompts for Accessibility
+swift test            # unit tests (WicherCoreTests)
 ```
 
-App icon: `wicher/Resources/Wicher.icon` (Icon Composer; light/dark/tinted/clear). Run
-`wicher/scripts/make-icon.sh` after editing it — it needs full Xcode and regenerates the
+App icon: `Resources/Wicher.icon` (Icon Composer; light/dark/tinted/clear). Run
+`scripts/make-icon.sh` after editing it — it needs full Xcode and regenerates the
 committed `Resources/Assets.car` (macOS 26+), `Resources/Wicher.icns` (older macOS) and
 `Resources/preview/`; `build.sh` only copies them, so CLT-only builds still work.
 
@@ -52,7 +55,7 @@ verify those by building the app, granting Accessibility, and exercising ⌥Tab.
 
 Signing: `build.sh` signs with the "Wicher Development" identity (override with
 `WICHER_SIGN_IDENTITY`) when it exists, else ad-hoc. Create it once with
-`wicher/scripts/make-signing-identity.sh` (self-signed, login keychain). With it, the
+`scripts/make-signing-identity.sh` (self-signed, login keychain). With it, the
 designated requirement is `certificate leaf = H"…"`, stable across rebuilds, so the
 Accessibility grant survives. Ad-hoc signing changes the cdhash every build and macOS
 re-prompts; toggling Wicher off/on in System Settings → Privacy & Security →
