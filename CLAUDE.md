@@ -45,8 +45,12 @@ database. Flow of one switch:
 2. **`HotKeyCenter`** — `RegisterEventHotKey` wrapper that reports **press and release**.
    Release is what drives commit-on-modifier-release; there is deliberately no event tap,
    which is why wicher cannot (and must not try to) intercept system ⌘Tab.
-3. **`SwitcherController`** — the whole session state machine: show-delay, hold-to-repeat,
-   grouping, search, selection, commit. The largest and most delicate file.
+3. **`SwitcherController`** — session lifecycle and wiring: show-delay, hold-to-repeat,
+   event monitors, panel placement, commit. It drives two pieces:
+   - **`SwitcherSession`** — value-type model of one session: rows for the current query
+     (grouped, or fuzzy-scored when searching) and the selection. No views or timers.
+   - **`SwitcherListView`** — the panel's content view: backdrop, search bar, rows,
+     selection highlight, preferred height.
 4. **`WindowEnumerator`** (singleton) — AX discovery + MRU bookkeeping.
 5. **`WindowGrouping`** — pure function: `(profile, Enumeration, activePID) → [WindowSection]`.
    Put filtering/ordering policy here, not in the controller; it is the one piece that is
