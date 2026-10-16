@@ -23,11 +23,19 @@ and no git repository.
 ```sh
 cd wicher && ./build.sh      # swift build -c release + assemble + ad-hoc sign Wicher.app
 open wicher/Wicher.app       # first launch prompts for Accessibility
+cd wicher && swift test      # unit tests (WicherCoreTests)
 ```
 
 `swift build` alone compiles but produces a bare binary, not the `LSUIElement` bundle —
-hot keys and the HUD need the assembled `.app`. There is **no test target**; verify
-changes by building the app, granting Accessibility, and exercising ⌥Tab.
+hot keys and the HUD need the assembled `.app`.
+
+The package is split so the code is testable: `Sources/WicherCore` (library, all the
+code) and `Sources/wicher` (executable: just `main.swift` → `WicherApp.run()`). Tests
+in `Tests/WicherCoreTests` use `@testable import WicherCore` and cover only the pure
+pieces — `WindowGrouping`, `FuzzyMatcher`, `HUDMetrics`, `SwitcherSession` — with
+hand-built `WindowInfo`/`Enumeration` fixtures (`axWindow: nil`). Enumeration, AX,
+hot keys and the HUD itself have no tests; verify those by building the app, granting
+Accessibility, and exercising ⌥Tab.
 
 Because the app is ad-hoc signed, its cdhash changes on every rebuild, so macOS
 re-prompts for Accessibility access after each `./build.sh`. Toggling Wicher off/on in
