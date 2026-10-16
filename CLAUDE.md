@@ -117,7 +117,12 @@ concentric: `rowCornerRadius = panelCornerRadius − listInset` (capped at a cap
 The HUD backdrop is `NSGlassEffectView` (Liquid Glass) on macOS 26+, with the search bar
 and list in its `contentView`; older systems get the masked `NSVisualEffectView`
 (`maskImage`, since `layer.cornerRadius` doesn't clip a behind-window blur). Neither
-renders in an offscreen snapshot.
+renders in an offscreen snapshot. Glass is composited by the window server and spills a
+soft edge past its bounds, so on macOS 26+ the panel window is `HUDMetrics.windowMargin`
+larger than the glass on every side and has no window shadow — a window cut flush to
+the glass showed a square outline (shadow) and clipped glow patches at the corners.
+Rows are re-placed on the scroll view's clip-view frame changes, not in `layout()`:
+inside the glass the scroll view settles after the list view's own layout pass.
 
 ## Invariants worth knowing before changing enumeration
 

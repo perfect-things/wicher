@@ -285,10 +285,10 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
         listView.render(session.rows, metrics: metrics)
 
         let frame = sessionScreen?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let height = listView.preferredHeight(maxListHeight: frame.height * 0.7)
-        let origin = NSPoint(x: frame.midX - metrics.panelWidth / 2,
-                             y: frame.midY - height / 2)
-        panel.setFrame(NSRect(x: origin.x, y: origin.y, width: metrics.panelWidth, height: height), display: true)
+        let size = metrics.windowSize(panelHeight: listView.preferredHeight(maxListHeight: frame.height * 0.7))
+        let origin = NSPoint(x: frame.midX - size.width / 2,
+                             y: frame.midY - size.height / 2)
+        panel.setFrame(NSRect(origin: origin, size: size), display: true)
         // The window shadow is cached from the previous opaque shape; without
         // this it keeps the old (or square) outline after a resize.
         panel.invalidateShadow()

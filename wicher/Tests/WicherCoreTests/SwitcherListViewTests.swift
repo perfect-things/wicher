@@ -8,7 +8,7 @@ final class SwitcherListViewTests: XCTestCase {
 
     private func makeView(height: CGFloat = 400) -> SwitcherListView {
         let view = SwitcherListView()
-        view.frame = NSRect(x: 0, y: 0, width: metrics.panelWidth, height: height)
+        view.frame = NSRect(origin: .zero, size: metrics.windowSize(panelHeight: height))
         return view
     }
 
@@ -126,10 +126,10 @@ final class SwitcherListViewTests: XCTestCase {
         XCTAssertEqual(emptyLabel(view)?.isHidden, true)
 
         if let dir = ProcessInfo.processInfo.environment["WICHER_SNAPSHOT_DIR"] {
-            let small = makeView(height: 52 + view.preferredHeight(maxListHeight: 1000))
+            let small = makeView(height: 52 + view.preferredHeight(maxListHeight: 1000))  // resized below
             small.setQuery("zzz")
             small.render([], metrics: metrics)
-            small.frame.size.height = small.preferredHeight(maxListHeight: 1000)
+            small.frame.size = metrics.windowSize(panelHeight: small.preferredHeight(maxListHeight: 1000))
             small.layoutSubtreeIfNeeded()
             if let rep = small.bitmapImageRepForCachingDisplay(in: small.bounds) {
                 small.cacheDisplay(in: small.bounds, to: rep)
@@ -137,5 +137,18 @@ final class SwitcherListViewTests: XCTestCase {
                     .write(to: URL(fileURLWithPath: dir).appendingPathComponent("empty.png"))
             }
         }
+    }
+
+    /// First open after launch: rows are rendered while the view still has its
+    /// initial width, then the panel is resized. Rows must follow.
+    func testRowsFollowAWidthChangeAfterRender() {
+        let view = SwitcherListView()
+        view.frame = NSRect(x: 0, y: 0, width: 560, height: 320)   // the panel's initial size
+        view.layoutSubtreeIfNeeded()
+        view.render(rows(2), metrics: metrics)
+        view.frame = NSRect(origin: .zero, size: metrics.windowSize(panelHeight: 200))
+        view.layoutSubtreeIfNeeded()
+        XCTAssertEqual(rowFrames(view).map(\.width),
+                       Array(repeating: metrics.panelWidth - 2 * metrics.listInset, count: 2))
     }
 }

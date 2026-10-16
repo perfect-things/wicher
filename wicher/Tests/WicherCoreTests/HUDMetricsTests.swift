@@ -54,4 +54,10 @@ final class HUDMetricsTests: XCTestCase {
         let tight = HUDMetrics.make(iconSize: 16, textSize: 10, rowPadding: 0)
         XCTAssertEqual(tight.rowCornerRadius, tight.rowHeight / 2)
     }
+
+    func testWindowAddsMarginOnEverySide() {
+        let m = HUDMetrics.make(iconSize: 32, textSize: 16, rowPadding: 7)
+        XCTAssertEqual(m.windowSize(panelHeight: 100),
+                       CGSize(width: m.panelWidth + 2 * m.windowMargin, height: 100 + 2 * m.windowMargin))
+    }
 }

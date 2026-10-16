@@ -20,6 +20,15 @@ struct HUDMetrics: Equatable {
     /// Gap between the panel edge and the rows, the same on all four sides.
     let listInset: CGFloat
     let rowCornerRadius: CGFloat
+    /// Transparent space between the panel window's edge and the visible
+    /// panel. Liquid Glass renders a soft edge slightly *outside* its bounds;
+    /// with the window cut flush to the glass, the window's square corners
+    /// clipped that edge into visible patches. Zero for the pre-glass blur.
+    let windowMargin: CGFloat
+    /// The panel window's size for a given visible panel height.
+    func windowSize(panelHeight: CGFloat) -> CGSize {
+        CGSize(width: panelWidth + 2 * windowMargin, height: panelHeight + 2 * windowMargin)
+    }
 
     static let defaultPanelCornerRadius: CGFloat = 24
     static let defaultListInset: CGFloat = 8
@@ -45,8 +54,14 @@ struct HUDMetrics: Equatable {
             panelCornerRadius: defaultPanelCornerRadius,
             listInset: defaultListInset,
             // Concentric with the panel, but never more than a capsule.
-            rowCornerRadius: min(defaultPanelCornerRadius - defaultListInset, rowHeight / 2)
+            rowCornerRadius: min(defaultPanelCornerRadius - defaultListInset, rowHeight / 2),
+            windowMargin: glassWindowMargin
         )
+    }
+
+    static var glassWindowMargin: CGFloat {
+        if #available(macOS 26, *) { return 24 }
+        return 0
     }
 }
 

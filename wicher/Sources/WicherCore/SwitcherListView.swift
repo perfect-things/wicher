@@ -126,6 +126,10 @@ final class SwitcherListView: NSView {
         scrollView.automaticallyAdjustsContentInsets = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.documentView = document
+        scrollView.contentView.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(self, selector: #selector(clipViewFrameChanged(_:)),
+                                               name: NSView.frameDidChangeNotification,
+                                               object: scrollView.contentView)
 
         emptyLabel.alignment = .center
         emptyLabel.textColor = .secondaryLabelColor
@@ -136,16 +140,19 @@ final class SwitcherListView: NSView {
         content.addSubview(scrollView)
 
         searchHeight = searchContainer.heightAnchor.constraint(equalToConstant: 0)
+        // The visible panel sits `windowMargin` inside this view (the panel
+        // window's content view); see `HUDMetrics.windowMargin`.
+        let margin = HUDMetrics.glassWindowMargin
         NSLayoutConstraint.activate([
-            backdrop.topAnchor.constraint(equalTo: topAnchor),
-            backdrop.leadingAnchor.constraint(equalTo: leadingAnchor),
-            backdrop.trailingAnchor.constraint(equalTo: trailingAnchor),
-            backdrop.bottomAnchor.constraint(equalTo: bottomAnchor),
+            backdrop.topAnchor.constraint(equalTo: topAnchor, constant: margin),
+            backdrop.leadingAnchor.constraint(equalTo: leadingAnchor, constant: margin),
+            backdrop.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -margin),
+            backdrop.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -margin),
 
-            content.topAnchor.constraint(equalTo: topAnchor),
-            content.leadingAnchor.constraint(equalTo: leadingAnchor),
-            content.trailingAnchor.constraint(equalTo: trailingAnchor),
-            content.bottomAnchor.constraint(equalTo: bottomAnchor),
+            content.topAnchor.constraint(equalTo: backdrop.topAnchor),
+            content.leadingAnchor.constraint(equalTo: backdrop.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: backdrop.trailingAnchor),
+            content.bottomAnchor.constraint(equalTo: backdrop.bottomAnchor),
 
             searchContainer.topAnchor.constraint(equalTo: content.topAnchor),
             searchContainer.leadingAnchor.constraint(equalTo: content.leadingAnchor),
@@ -282,9 +289,13 @@ final class SwitcherListView: NSView {
         document.frame = NSRect(x: 0, y: 0, width: width, height: y + insets.bottom)
     }
 
-    override func layout() {
-        super.layout()
-        // The panel is resized after `render`, so the row width is only final now.
+    /// Rows are sized from the scroll view's visible width, which is only
+    /// final after the panel is resized — and, inside the glass, after a layout
+    /// pass of its own that runs later than ours. So follow the clip view's
+    /// actual frame rather than guessing when layout has settled: on the first
+    /// open after launch, a check in `layout()` ran too early and the rows kept
+    /// the panel's initial width.
+    @objc private func clipViewFrameChanged(_ note: Notification) {
         if document.frame.width != scrollView.contentSize.width { layoutRows() }
     }
 
@@ -320,6 +331,7 @@ final class SwitcherListView: NSView {
     /// The height this view wants for the rendered rows: the search bar plus
     /// the list, with the list capped at `maxListHeight` (it scrolls beyond).
     /// An empty list still reserves one row's height.
+    /// The visible panel's height (excluding `windowMargin`).
     func preferredHeight(maxListHeight: CGFloat) -> CGFloat {
         var contentHeight: CGFloat = listInsets.top + listInsets.bottom
         for row in rows {
