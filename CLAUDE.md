@@ -110,7 +110,14 @@ shortcut). Every setter posts `Settings.didChange` with a `Settings.Change`;
 Shift. In the panel, `handleKeyDown` subtracts the trigger's modifiers, so ⌘-held typing
 searches when the shortcut is ⌘Tab.
 `HUDMetrics.make(iconSize:textSize:rowPadding:)` derives every pixel dimension — don't
-hardcode row heights or panel widths elsewhere.
+hardcode row heights or panel widths elsewhere. That includes the corners, which are
+concentric: `rowCornerRadius = panelCornerRadius − listInset` (capped at a capsule), with
+`listInset` equal on all four sides.
+
+The HUD backdrop is `NSGlassEffectView` (Liquid Glass) on macOS 26+, with the search bar
+and list in its `contentView`; older systems get the masked `NSVisualEffectView`
+(`maskImage`, since `layer.cornerRadius` doesn't clip a behind-window blur). Neither
+renders in an offscreen snapshot.
 
 ## Invariants worth knowing before changing enumeration
 

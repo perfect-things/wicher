@@ -5,7 +5,7 @@ private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
-/// The HUD's whole content: blurred rounded backdrop, the search bar, and the
+/// The HUD's whole content: rounded glass backdrop, the search bar, and the
 /// scrolling list of rows. Turns `[DisplayRow]` into views, shows the
 /// selection, and reports the height it wants. Knows nothing about sessions,
 /// screens or the panel it sits in.
@@ -14,10 +14,15 @@ private final class FlippedView: NSView {
 /// re-renders on every keystroke, and with dozens of windows rebuilding meant
 /// dozens of view allocations and hundreds of constraints per character. Rows
 /// have fixed heights from `HUDMetrics`, so they are placed by frame.
-final class SwitcherListView: NSVisualEffectView {
+final class SwitcherListView: NSView {
     /// Receives hover/click from every row this view creates.
     weak var rowDelegate: SwitcherRowViewDelegate?
 
+    /// Liquid Glass on macOS 26+, a blurred `NSVisualEffectView` before.
+    private let backdrop: NSView
+    /// Everything drawn on top of the backdrop. Glass needs it as its
+    /// `contentView` to render (and tint) it correctly.
+    private let content = NSView()
     private let searchContainer = NSView()
     private let searchField = NSTextField(labelWithString: "")
     private let scrollView = NSScrollView()
@@ -37,21 +42,45 @@ final class SwitcherListView: NSVisualEffectView {
     private var headerPool: [SwitcherHeaderView] = []
     private var rowViews: [Int: SwitcherRowView] = [:] // row index -> view, current render only
 
-    /// Corner radius of the HUD. Used for both the backdrop mask and the
-    /// layer clip so the two never disagree.
-    private static let cornerRadius: CGFloat = 16
+    /// Corner radius of the HUD; see `HUDMetrics` for how the row highlight's
+    /// radius follows from it.
+    private static let cornerRadius = HUDMetrics.defaultPanelCornerRadius
     private static let searchBarHeight: CGFloat = 52
-    /// Padding around the list inside the scroll view.
-    private static let listInsets = NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
+
+    /// Padding around the list inside the scroll view — equal on all sides,
+    /// which is what makes the highlight's corners concentric with the panel's.
+    private var listInsets: NSEdgeInsets {
+        NSEdgeInsets(top: metrics.listInset, left: metrics.listInset,
+                     bottom: metrics.listInset, right: metrics.listInset)
+    }
 
     init() {
+        backdrop = Self.makeBackdrop()
         super.init(frame: .zero)
         build()
     }
 
+    private static func makeBackdrop() -> NSView {
+        if #available(macOS 26, *) {
+            let glass = NSGlassEffectView()
+            glass.style = .regular
+            glass.cornerRadius = cornerRadius
+            return glass
+        }
+        let blur = NSVisualEffectView()
+        blur.material = .hudWindow
+        blur.blendingMode = .behindWindow
+        blur.state = .active
+        blur.wantsLayer = true
+        blur.layer?.cornerRadius = cornerRadius
+        blur.layer?.masksToBounds = true
+        blur.maskImage = backdropMask(radius: cornerRadius)
+        return blur
+    }
+
     required init?(coder: NSCoder) { preconditionFailure("not used") }
 
-    /// A resizable rounded-rect mask for the visual-effect view.
+    /// A resizable rounded-rect mask for the pre-glass visual-effect view.
     ///
     /// `layer.cornerRadius` only clips what *AppKit* draws; the blurred
     /// backdrop behind an `NSVisualEffectView` is composited by the window
@@ -71,14 +100,16 @@ final class SwitcherListView: NSVisualEffectView {
     }
 
     private func build() {
-        material = .hudWindow
-        blendingMode = .behindWindow
-        state = .active
-        wantsLayer = true
-        layer?.cornerRadius = Self.cornerRadius
-        layer?.masksToBounds = true
-        maskImage = Self.backdropMask(radius: Self.cornerRadius)
         translatesAutoresizingMaskIntoConstraints = false
+
+        backdrop.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(backdrop)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        if #available(macOS 26, *), let glass = backdrop as? NSGlassEffectView {
+            glass.contentView = content
+        } else {
+            backdrop.addSubview(content)
+        }
 
         searchContainer.wantsLayer = true
         searchContainer.layer?.masksToBounds = true
@@ -101,14 +132,24 @@ final class SwitcherListView: NSVisualEffectView {
         emptyLabel.isHidden = true
         document.addSubview(emptyLabel)
 
-        addSubview(searchContainer)
-        addSubview(scrollView)
+        content.addSubview(searchContainer)
+        content.addSubview(scrollView)
 
         searchHeight = searchContainer.heightAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
-            searchContainer.topAnchor.constraint(equalTo: topAnchor),
-            searchContainer.leadingAnchor.constraint(equalTo: leadingAnchor),
-            searchContainer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            backdrop.topAnchor.constraint(equalTo: topAnchor),
+            backdrop.leadingAnchor.constraint(equalTo: leadingAnchor),
+            backdrop.trailingAnchor.constraint(equalTo: trailingAnchor),
+            backdrop.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            content.topAnchor.constraint(equalTo: topAnchor),
+            content.leadingAnchor.constraint(equalTo: leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            searchContainer.topAnchor.constraint(equalTo: content.topAnchor),
+            searchContainer.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            searchContainer.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             searchHeight,
 
             searchField.centerYAnchor.constraint(equalTo: searchContainer.centerYAnchor),
@@ -116,9 +157,9 @@ final class SwitcherListView: NSVisualEffectView {
             searchField.trailingAnchor.constraint(equalTo: searchContainer.trailingAnchor, constant: -22),
 
             scrollView.topAnchor.constraint(equalTo: searchContainer.bottomAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
     }
 
@@ -212,7 +253,7 @@ final class SwitcherListView: NSVisualEffectView {
 
     /// Places the visible rows top to bottom and sizes the document to fit.
     private func layoutRows() {
-        let insets = Self.listInsets
+        let insets = listInsets
         let width = scrollView.contentSize.width
         let rowWidth = max(0, width - insets.left - insets.right)
         if rows.isEmpty {
@@ -280,7 +321,7 @@ final class SwitcherListView: NSVisualEffectView {
     /// the list, with the list capped at `maxListHeight` (it scrolls beyond).
     /// An empty list still reserves one row's height.
     func preferredHeight(maxListHeight: CGFloat) -> CGFloat {
-        var contentHeight: CGFloat = Self.listInsets.top + Self.listInsets.bottom
+        var contentHeight: CGFloat = listInsets.top + listInsets.bottom
         for row in rows {
             switch row {
             case .header: contentHeight += metrics.headerHeight

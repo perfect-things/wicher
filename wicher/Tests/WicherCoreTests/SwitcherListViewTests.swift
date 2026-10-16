@@ -18,19 +18,25 @@ final class SwitcherListViewTests: XCTestCase {
         return rows
     }
 
+    private func scrollView(in view: NSView) -> NSScrollView? {
+        if let scroll = view as? NSScrollView { return scroll }
+        for sub in view.subviews { if let found = scrollView(in: sub) { return found } }
+        return nil
+    }
+
     private func rowFrames(_ view: SwitcherListView) -> [NSRect] {
         rowSubviews(view).filter { !$0.isHidden }.map(\.frame)
     }
 
     private func rowSubviews(_ view: SwitcherListView) -> [NSView] {
-        let scroll = view.subviews.compactMap { $0 as? NSScrollView }.first!
+        let scroll = scrollView(in: view)!
         return scroll.documentView!.subviews
             .filter { $0 is SwitcherRowView || $0 is SwitcherHeaderView }
             .sorted { $0.frame.minY < $1.frame.minY }
     }
 
     private func documentSubviews(_ view: SwitcherListView) -> [NSView] {
-        view.subviews.compactMap { $0 as? NSScrollView }.first!.documentView!.subviews
+        scrollView(in: view)!.documentView!.subviews
     }
 
     func testRowsAreStackedTopToBottomAtFixedHeights() {
@@ -38,11 +44,12 @@ final class SwitcherListViewTests: XCTestCase {
         view.render(rows(3, header: "Minimized"), metrics: metrics)
         view.layoutSubtreeIfNeeded()
         let frames = rowFrames(view)
-        XCTAssertEqual(frames.map(\.minY), [6, 6 + metrics.headerHeight,
-                                            6 + metrics.headerHeight + metrics.rowHeight,
-                                            6 + metrics.headerHeight + 2 * metrics.rowHeight])
+        let top = metrics.listInset
+        XCTAssertEqual(frames.map(\.minY), [top, top + metrics.headerHeight,
+                                            top + metrics.headerHeight + metrics.rowHeight,
+                                            top + metrics.headerHeight + 2 * metrics.rowHeight])
         XCTAssertEqual(frames.map(\.height), [metrics.headerHeight] + Array(repeating: metrics.rowHeight, count: 3))
-        XCTAssertTrue(frames.allSatisfy { $0.minX == 8 && $0.width == metrics.panelWidth - 16 })
+        XCTAssertTrue(frames.allSatisfy { $0.minX == metrics.listInset && $0.width == metrics.panelWidth - 2 * metrics.listInset })
     }
 
     func testViewsAreReusedAcrossRenders() {
@@ -70,7 +77,7 @@ final class SwitcherListViewTests: XCTestCase {
     func testPreferredHeightCapsAndReservesOneRow() {
         let view = makeView()
         view.render([], metrics: metrics)
-        XCTAssertEqual(view.preferredHeight(maxListHeight: 1000), 12 + metrics.rowHeight)
+        XCTAssertEqual(view.preferredHeight(maxListHeight: 1000), 2 * metrics.listInset + metrics.rowHeight)
         view.render(rows(50), metrics: metrics)
         XCTAssertEqual(view.preferredHeight(maxListHeight: 300), 300)
     }
@@ -109,7 +116,7 @@ final class SwitcherListViewTests: XCTestCase {
         let label = emptyLabel(view)
         XCTAssertEqual(label?.isHidden, false)
         XCTAssertEqual(label?.stringValue, "No matching windows")
-        XCTAssertEqual(label?.frame.midY ?? 0, 6 + metrics.rowHeight / 2, accuracy: 1)
+        XCTAssertEqual(label?.frame.midY ?? 0, metrics.listInset + metrics.rowHeight / 2, accuracy: 1)
 
         view.setQuery("")
         view.render([], metrics: metrics)

@@ -37,7 +37,8 @@ final class SwitcherRowView: NSView {
         self.metrics = metrics
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 8
+        layer?.cornerRadius = metrics.rowCornerRadius
+        layer?.cornerCurve = .continuous
 
         iconView.imageScaling = .scaleProportionallyUpOrDown
         titleField.lineBreakMode = .byTruncatingTail

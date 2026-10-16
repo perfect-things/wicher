@@ -44,4 +44,14 @@ final class HUDMetricsTests: XCTestCase {
         let m = HUDMetrics.make(iconSize: 16, textSize: 30, rowPadding: 4)
         XCTAssertEqual(m.rowHeight, 30 + 8)
     }
+
+    func testHighlightCornersAreConcentricWithPanel() {
+        let m = HUDMetrics.make(iconSize: 32, textSize: 16, rowPadding: 7)
+        XCTAssertEqual(m.rowCornerRadius + m.listInset, m.panelCornerRadius)
+    }
+
+    func testHighlightRadiusNeverExceedsACapsule() {
+        let tight = HUDMetrics.make(iconSize: 16, textSize: 10, rowPadding: 0)
+        XCTAssertEqual(tight.rowCornerRadius, tight.rowHeight / 2)
+    }
 }
