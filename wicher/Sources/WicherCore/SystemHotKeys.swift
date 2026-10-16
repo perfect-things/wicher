@@ -79,6 +79,35 @@ enum SystemHotKeys {
     static func setEnabled(_ id: Int32, _ enabled: Bool) {
         _ = functions?.setEnabled(id, enabled)
     }
+
+    // MARK: - Pausing every global hot key (while recording)
+
+    private typealias MainConnectionFn = @convention(c) () -> Int32
+    private typealias SetModeFn = @convention(c) (Int32, Int32) -> Int32
+
+    private static let operatingMode: (connection: MainConnectionFn, setMode: SetModeFn)? = {
+        guard let handle = dlopen(nil, RTLD_LAZY) else { return nil }
+        defer { dlclose(handle) }
+        guard let connection = dlsym(handle, "CGSMainConnectionID"),
+              let setMode = dlsym(handle, "CGSSetGlobalHotKeyOperatingMode")
+        else { return nil }
+        return (unsafeBitCast(connection, to: MainConnectionFn.self), unsafeBitCast(setMode, to: SetModeFn.self))
+    }()
+
+    /// Pauses (or resumes) every global hot key — the system's and every
+    /// app's — so the next chord is delivered as an ordinary key press.
+    ///
+    /// The public `PushSymbolicHotKeyMode` does this only for the system's
+    /// shortcuts and only while the process is trusted for Accessibility,
+    /// which an ad-hoc rebuild silently revokes; the window server then hands
+    /// ⌘Tab to the Dock anyway. This private call is scoped to wicher's
+    /// window-server connection, so the window server drops it if wicher dies
+    /// mid-recording.
+    static func setAllPaused(_ paused: Bool) {
+        guard let operatingMode else { return }
+        // 0 = enabled, 1 = disabled.
+        _ = operatingMode.setMode(operatingMode.connection(), paused ? 1 : 0)
+    }
 }
 
 /// Tracks which system hot keys wicher has switched off, so it can always

@@ -58,6 +58,7 @@ final class ProfileCardView: NSView {
             self.delegate?.card(self.profileID, didSetShortcut: combo)
             self.updateSystemNote()
         }
+        shortcutRecorder.onRecordingChanged = { [weak self] _ in self?.updateSystemNote() }
         stack.addArrangedSubview(row("Shortcut:", shortcutRecorder))
 
         systemNote.font = .systemFont(ofSize: 11)
@@ -118,6 +119,9 @@ final class ProfileCardView: NSView {
     private func updateSystemNote() {
         let combo = shortcutRecorder.combo
         var notes: [String] = []
+        if !AXIsProcessTrusted() {
+            notes.append("⚠︎ Accessibility access is off, so macOS shortcuts such as ⌘Tab cannot be replaced. Turn Wicher on in System Settings → Privacy & Security → Accessibility.")
+        }
         if let name = SystemHotKeyOverride.shared.overriddenShortcut(for: combo) {
             notes.append("Replaces \(name) while Wicher is running.")
         }

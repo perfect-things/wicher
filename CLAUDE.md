@@ -73,8 +73,11 @@ database. Flow of one switch:
      whatever a crashed run left off. Never disable a system hot key without going
      through it.
    - **`ShortcutRecorder`** (Preferences) captures any chord: it suspends wicher's hot
-     keys and uses public `PushSymbolicHotKeyMode(kHIHotKeyModeAllDisabled)` for the
-     duration of a recording. Validation is `HotKeyCombo.problem(amongOthers:)`: only bare
+     keys and, for the duration of a recording, pauses global hot keys twice over:
+     public `PushSymbolicHotKeyMode(kHIHotKeyModeAllDisabled)` (no-op without
+     Accessibility trust) and private `CGSSetGlobalHotKeyOperatingMode` (connection-scoped,
+     so it dies with the process). Without trust the ⌘Tab override likely won't work
+     either; the card says so. Validation is `HotKeyCombo.problem(amongOthers:)`: only bare
      typing keys and chords another switcher uses (incl. its reverse) are refused.
 3. **`SwitcherController`** — session lifecycle and wiring: show-delay, hold-to-repeat,
    event monitors, panel placement, commit. It drives two pieces:

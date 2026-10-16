@@ -22,6 +22,8 @@ final class ShortcutRecorder: NSButton {
     var validate: (HotKeyCombo) -> String? = { _ in nil }
     /// Called with an accepted chord.
     var onChange: (HotKeyCombo) -> Void = { _ in }
+    /// Called when recording starts (true) and ends (false).
+    var onRecordingChanged: (Bool) -> Void = { _ in }
 
     private(set) var isRecording = false
     private var monitor: Any?
@@ -64,6 +66,8 @@ final class ShortcutRecorder: NSButton {
 
         HotKeyCenter.shared.suspend()
         symbolicModeToken = PushSymbolicHotKeyMode(OptionBits(kHIHotKeyModeAllDisabled))
+        SystemHotKeys.setAllPaused(true)
+        onRecordingChanged(true)
 
         monitor = NSEvent.addLocalMonitorForEvents(
             matching: [.keyDown, .flagsChanged, .leftMouseDown, .rightMouseDown]
@@ -82,9 +86,11 @@ final class ShortcutRecorder: NSButton {
         monitor = nil
         if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
         resignObserver = nil
+        SystemHotKeys.setAllPaused(false)
         if let symbolicModeToken { PopSymbolicHotKeyMode(symbolicModeToken) }
         symbolicModeToken = nil
         HotKeyCenter.shared.resume()
+        onRecordingChanged(false)
         messageWork?.cancel()
         state = .off
         title = combo.displayString
