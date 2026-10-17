@@ -1,6 +1,6 @@
 # TODO
-- [ ] packaging to dmg
-- [ ] distribution to homebrew
+- [x] packaging to dmg
+- [x] distribution to homebrew
 
 
 

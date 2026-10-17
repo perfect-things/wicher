@@ -42,6 +42,17 @@ full **Light / Dark / System** appearance support.
   via the Accessibility API, so it does *not* require Screen Recording.
 - **Menubar app.** — no Dock icon; lives in the menu bar.
 
+## Install
+
+```sh
+brew install --cask perfect-things/tap/wicher
+```
+
+Or grab the `.dmg` from [Releases](https://github.com/perfect-things/wicher/releases).
+Wicher is self-signed, not notarized: the first launch of a downloaded copy needs
+**System Settings → Privacy & Security → Open Anyway** (Homebrew installs skip this).
+Apple Silicon, macOS 13+.
+
 ## Build & run
 
 ```sh
@@ -61,6 +72,11 @@ Tools). Development only: without a signing identity the app is **ad-hoc
 signed**, so macOS re-asks for Accessibility access after each rebuild. Run
 `scripts/make-signing-identity.sh` once to create a local self-signed identity;
 `build.sh` then signs with it and the grant survives rebuilds.
+
+Releases: `just release 0.2.0` bumps `Info.plist`, tags and pushes; the
+`release` workflow tests, builds and signs with the same self-signed identity
+(secret `SIGNING_P12`), publishes a `.zip` and `.dmg` to GitHub Releases, and
+bumps the cask in [perfect-things/homebrew-tap](https://github.com/perfect-things/homebrew-tap).
 
 The app icon is an Icon Composer document (`Resources/Wicher.icon`). After
 editing it, run `scripts/make-icon.sh` (needs full Xcode) to regenerate the
@@ -86,6 +102,8 @@ committed `Assets.car`, `Wicher.icns` and previews; `build.sh` just copies them.
 ```
 Package.swift            SwiftPM: WicherCore library, wicher executable, tests; macOS 13+
 Info.plist               LSUIElement agent-app bundle metadata
+.github/workflows/release.yml  v* tag → test, build, sign, GitHub release, bump the tap's cask
+.github/release-notes.md       install notes prepended to each release
 scripts/
   build.sh               compile + assemble Wicher.app + sign (stable identity or ad-hoc)
   make-signing-identity.sh  one-time local self-signed signing identity

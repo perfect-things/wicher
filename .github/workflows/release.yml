@@ -1,0 +1,117 @@
+# Builds, signs and publishes a release when a v* tag is pushed (`just release x.y.z`),
+# then bumps the cask in perfect-things/homebrew-tap.
+#
+# Secrets:
+#   SIGNING_P12           base64 of the "Wicher Development" identity exported as .p12
+#   SIGNING_P12_PASSWORD  its export password
+#   TAP_DEPLOY_KEY        private half of a write deploy key on perfect-things/homebrew-tap
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check version
+        run: |
+          VERSION="${TAG#v}"
+          PLIST="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)"
+          if [[ "$VERSION" != "$PLIST" ]]; then
+            echo "::error::Tag $TAG does not match Info.plist version $PLIST"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Test
+        run: swift test
+
+      # The same self-signed identity as local builds, so the designated requirement —
+      # and with it the user's Accessibility grant — stays the same across releases.
+      - name: Import signing identity
+        env:
+          SIGNING_P12: ${{ secrets.SIGNING_P12 }}
+          SIGNING_P12_PASSWORD: ${{ secrets.SIGNING_P12_PASSWORD }}
+        run: |
+          if [[ -z "$SIGNING_P12" ]]; then
+            echo "::error::SIGNING_P12 is not set; an ad-hoc build would re-prompt for Accessibility on every update"
+            exit 1
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASS="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          base64 --decode <<< "$SIGNING_P12" > "$RUNNER_TEMP/identity.p12"
+          security import "$RUNNER_TEMP/identity.p12" -k "$KEYCHAIN" -P "$SIGNING_P12_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/identity.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+
+      - name: Build
+        run: |
+          scripts/build.sh
+          # build.sh falls back to ad-hoc signing silently; a release must not.
+          codesign -dvv Wicher.app 2>&1 | grep -q '^Authority=Wicher Development$' \
+            || { echo "::error::Wicher.app is not signed with Wicher Development"; exit 1; }
+
+      - name: Package
+        run: |
+          ZIP="Wicher-$VERSION.zip"
+          DMG="Wicher-$VERSION.dmg"
+          ditto -c -k --keepParent Wicher.app "$ZIP"
+
+          STAGE="$RUNNER_TEMP/dmg"
+          mkdir -p "$STAGE"
+          ditto Wicher.app "$STAGE/Wicher.app"
+          ln -s /Applications "$STAGE/Applications"
+          # hdiutil on hosted runners intermittently fails with "Resource busy".
+          for attempt in 1 2 3; do
+            hdiutil create -volname Wicher -srcfolder "$STAGE" -format UDZO -ov "$DMG" && break
+            [[ $attempt == 3 ]] && exit 1
+            sleep 5
+          done
+
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+          echo "DMG=$DMG" >> "$GITHUB_ENV"
+          echo "SHA=$(shasum -a 256 "$ZIP" | cut -d' ' -f1)" >> "$GITHUB_ENV"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" "$ZIP" "$DMG" \
+            --title "Wicher $VERSION" \
+            --notes-file .github/release-notes.md \
+            --generate-notes
+
+      - name: Bump Homebrew cask
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+        run: |
+          eval "$(ssh-agent -s)"
+          ssh-add - <<< "$TAP_DEPLOY_KEY"
+          git clone git@github.com:perfect-things/homebrew-tap.git "$RUNNER_TEMP/tap"
+          cd "$RUNNER_TEMP/tap"
+          sed -i '' -E \
+            -e "s/^  version \".*\"/  version \"$VERSION\"/" \
+            -e "s/^  sha256 \".*\"/  sha256 \"$SHA\"/" \
+            Casks/wicher.rb
+          if git diff --quiet; then
+            echo "Cask already at $VERSION"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -am "wicher $VERSION"
+          git push

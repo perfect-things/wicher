@@ -37,6 +37,18 @@ icon:
 signing-identity:
     scripts/make-signing-identity.sh
 
+# Bump the version, commit, tag and push; CI builds the release and bumps the Homebrew cask
+release version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ -z "$(git status --porcelain)" ]] || { echo "✗ Working tree not clean" >&2; exit 1; }
+    build=$(( $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' Info.plist) + 1 ))
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString {{version}}" -c "Set :CFBundleVersion $build" Info.plist
+    git commit -qam "Wicher {{version}}"
+    git tag "v{{version}}"
+    git push --atomic origin HEAD "v{{version}}"
+    echo "✓ Pushed v{{version}}; follow the build with: gh run watch"
+
 # Remove build products
 clean:
     rm -rf .build Wicher.app

@@ -61,6 +61,13 @@ Accessibility grant survives. Ad-hoc signing changes the cdhash every build and 
 re-prompts; toggling Wicher off/on in System Settings → Privacy & Security →
 Accessibility is the fix when the HUD suddenly lists nothing (it also shows a notice).
 
+Release: `just release x.y.z` bumps `Info.plist`, tags `vx.y.z` and pushes;
+`.github/workflows/release.yml` (macos-26 runner) checks tag = plist version, runs tests,
+imports the "Wicher Development" p12 (secret `SIGNING_P12`/`SIGNING_P12_PASSWORD`) and
+fails rather than ship an ad-hoc build, publishes `Wicher-x.y.z.zip` + `.dmg`, then pushes
+the new version/sha256 to `Casks/wicher.rb` in `perfect-things/homebrew-tap` (deploy key
+`TAP_DEPLOY_KEY`). The cask's `url` must keep matching the zip's name.
+
 ## Architecture
 
 AppKit + Carbon + Accessibility + CoreGraphics, no third-party dependencies, no
