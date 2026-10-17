@@ -8,3 +8,6 @@ DerivedData/
 
 # Built app bundle (scripts/build.sh)
 Wicher.app/
+
+# Test snapshots (just snapshot)
+snapshots/

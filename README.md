@@ -50,6 +50,9 @@ swift test          # unit tests
 open Wicher.app     # first launch prompts for Accessibility access
 ```
 
+The same tasks are wrapped in a `justfile`: `just build|test|run|install|snapshot|icon|clean`;
+plain `just` lists them.
+
 Grant **System Settings → Privacy & Security → Accessibility → Wicher**, then
 relaunch. Press **⌥Tab**.
 

@@ -24,6 +24,10 @@ open Wicher.app       # first launch prompts for Accessibility
 swift test            # unit tests (WicherCoreTests)
 ```
 
+The `justfile` wraps these (`build`, `test`, `run` = build + relaunch, `install` = build + copy
+to /Applications, `snapshot`,
+`icon`, `signing-identity`, `clean`); plain `just` lists them.
+
 App icon: `Resources/Wicher.icon` (Icon Composer; light/dark/tinted/clear). Run
 `scripts/make-icon.sh` after editing it — it needs full Xcode and regenerates the
 committed `Resources/Assets.car` (macOS 26+), `Resources/Wicher.icns` (older macOS) and
