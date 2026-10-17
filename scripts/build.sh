@@ -19,7 +19,7 @@ if [[ ! -x "$BIN_PATH" ]]; then
   exit 1
 fi
 
-echo "▸ Assembling $APP…"
+echo "▸ Assembling ${APP}…"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_PATH" "$APP/Contents/MacOS/Wicher"
