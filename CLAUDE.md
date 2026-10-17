@@ -10,8 +10,8 @@ The repo root is the Swift package (`Package.swift`, `Sources/`, `Tests/`, `Reso
 - `scripts/` — every shell script: `build.sh`, `make-icon.sh`,
   `make-signing-identity.sh`. Each `cd`s to the repo root itself, so they run from
   anywhere.
-- `README.md` — user-facing overview, build steps and source layout. Keep its Layout
-  section in sync when adding/removing source files.
+- `README.md` — short user-facing overview: install, usage, build. Keep it to the
+  essentials; internals belong here, not there.
 
 `Wicher.app` (built by `scripts/build.sh` at the root) and `.build/` are gitignored —
 never commit build products.
