@@ -6,11 +6,11 @@
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
 	<string>Wicher</string>
+	<key>CFBundleExecutable</key>
+	<string>Wicher</string>
 	<key>CFBundleIconFile</key>
 	<string>Wicher</string>
 	<key>CFBundleIconName</key>
-	<string>Wicher</string>
-	<key>CFBundleExecutable</key>
 	<string>Wicher</string>
 	<key>CFBundleIdentifier</key>
 	<string>dev.wicher.app</string>
@@ -23,12 +23,11 @@
 	<key>CFBundleShortVersionString</key>
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
-	<key>LSMinimumSystemVersion</key>
-	<string>13.0</string>
+	<string>2</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
-	<!-- Agent app: no Dock icon, lives in the menu bar. -->
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHighResolutionCapable</key>
