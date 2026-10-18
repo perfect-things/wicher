@@ -38,8 +38,7 @@ enum HighlightStyle: Int, CaseIterable {
         }
     }
 
-    /// The glass styles need `NSGlassEffectView`; earlier systems get the
-    /// neutral fill instead.
+    /// The styles drawn with a row-level `NSGlassEffectView`.
     var isGlass: Bool { self == .glass || self == .clearGlass || self == .tintedGlass }
 }
 

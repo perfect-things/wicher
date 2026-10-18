@@ -11,7 +11,7 @@ brew install --cask perfect-things/tap/wicher
 Or grab the `.dmg` from [Releases](https://github.com/perfect-things/wicher/releases).
 Wicher is self-signed, not notarized: the first launch of a downloaded copy needs
 **System Settings → Privacy & Security → Open Anyway** (Homebrew installs skip this).
-Apple Silicon, macOS 13+. Needs only **Accessibility** access (no Screen Recording).
+Apple Silicon, macOS 26+. Needs only **Accessibility** access (no Screen Recording).
 
 ## Usage
 

@@ -34,9 +34,9 @@ committed `Resources/Assets.car` (macOS 26+), `Resources/Wicher.icns` (older mac
 `Resources/preview/`; `build.sh` only copies them, so CLT-only builds still work.
 
 `build.sh` also rewrites the binary's `LC_BUILD_VERSION` SDK field with `vtool`:
-SwiftPM stamps it with the deployment target (13.0), and AppKit then draws legacy
-controls (mini switches, flat sidebar, automatic menu icons) as if wicher were an old app.
-`swift test` binaries keep the old stamp, so offscreen snapshots show the legacy look.
+SwiftPM stamps it with the deployment target (26.0), and AppKit then treats wicher as
+built against that SDK — no macOS 27 behaviors (e.g. it adds automatic menu icons).
+`swift test` binaries keep the deployment-target stamp.
 
 `swift build` alone compiles but produces a bare binary, not the `LSUIElement` bundle —
 hot keys and the HUD need the assembled `.app`.
@@ -140,16 +140,15 @@ hardcode row heights or panel widths elsewhere. That includes the corners, which
 concentric: `rowCornerRadius = panelCornerRadius − listInset` (capped at a capsule), with
 `listInset` equal on all four sides.
 
-The HUD backdrop is `NSGlassEffectView` (Liquid Glass) on macOS 26+, with the search bar
-and list in its `contentView`; older systems get the masked `NSVisualEffectView`
-(`maskImage`, since `layer.cornerRadius` doesn't clip a behind-window blur). Neither
-renders in an offscreen snapshot. Glass is composited by the window server and spills a
-soft edge past its bounds, so on macOS 26+ the panel window is `HUDMetrics.windowMargin`
+The deployment target is macOS 26, so Liquid Glass is always available — no fallbacks.
+The HUD backdrop is `NSGlassEffectView`, with the search bar and list in its
+`contentView`; it doesn't render in an offscreen snapshot. Glass is composited by the
+window server and spills a soft edge past its bounds, so the panel window is `HUDMetrics.windowMargin`
 larger than the glass on every side and has no window shadow — a window cut flush to
 the glass showed a square outline (shadow) and clipped glow patches at the corners.
 The selected row's look is `Settings.highlightStyle` (`HighlightStyle`, default `.glass`):
-the glass styles put a lazily made `NSGlassEffectView` behind the row's content and fall
-back to the neutral fill before macOS 26; only `.accent` switches text to white.
+the glass styles put a lazily made `NSGlassEffectView` behind the row's content; only
+`.accent` switches text to white.
 Rows are re-placed on the scroll view's clip-view frame changes, not in `layout()`:
 inside the glass the scroll view settles after the list view's own layout pass.
 

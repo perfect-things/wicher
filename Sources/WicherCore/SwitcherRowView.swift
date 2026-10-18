@@ -22,7 +22,7 @@ final class SwitcherRowView: NSView {
     private let titleField = NSTextField(labelWithString: "")
     private let appField = NSTextField(labelWithString: "")
     /// Behind the content for the glass highlight styles; made on first use.
-    private var glassView: NSView?
+    private var glassView: NSGlassEffectView?
     /// Set on mouse-down inside this row, so a drag that merely *ends* over
     /// a row does not activate it.
     private var pressed = false
@@ -86,10 +86,8 @@ final class SwitcherRowView: NSView {
     }
 
     private func applySelectionAppearance() {
-        var style = Settings.shared.highlightStyle
-        if #unavailable(macOS 26), style.isGlass { style = .neutral }
-        let glassShown = isSelected && style.isGlass
-        if #available(macOS 26, *), glassShown { showGlass(style) } else { glassView?.isHidden = true }
+        let style = Settings.shared.highlightStyle
+        if isSelected && style.isGlass { showGlass(style) } else { glassView?.isHidden = true }
 
         // Colors are resolved to CGColors here, so re-apply when the
         // effective appearance (light/dark) changes too.
@@ -109,9 +107,8 @@ final class SwitcherRowView: NSView {
             : .secondaryLabelColor
     }
 
-    @available(macOS 26, *)
     private func showGlass(_ style: HighlightStyle) {
-        let glass = (glassView as? NSGlassEffectView) ?? {
+        let glass = glassView ?? {
             let glass = NSGlassEffectView()
             glass.cornerRadius = metrics.rowCornerRadius
             glass.frame = bounds

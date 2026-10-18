@@ -25,7 +25,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_PATH" "$APP/Contents/MacOS/Wicher"
 cp Info.plist "$APP/Contents/Info.plist"
 # SwiftPM stamps the binary with the deployment target as its SDK version
-# (LC_BUILD_VERSION sdk 13.0), so AppKit treats wicher as an old app and draws
+# (LC_BUILD_VERSION sdk 26.0), so AppKit treats wicher as an old app and draws
 # legacy controls (mini switches, flat sidebar, auto menu icons). Record the
 # SDK it was really built against.
 SDK_VERSION="$(xcrun --show-sdk-version)"

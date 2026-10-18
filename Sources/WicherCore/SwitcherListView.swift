@@ -18,8 +18,8 @@ final class SwitcherListView: NSView {
     /// Receives hover/click from every row this view creates.
     weak var rowDelegate: SwitcherRowViewDelegate?
 
-    /// Liquid Glass on macOS 26+, a blurred `NSVisualEffectView` before.
-    private let backdrop: NSView
+    /// The Liquid Glass panel; `content` is its `contentView`.
+    private let backdrop: NSGlassEffectView
     /// Everything drawn on top of the backdrop. Glass needs it as its
     /// `contentView` to render (and tint) it correctly.
     private let content = NSView()
@@ -60,44 +60,14 @@ final class SwitcherListView: NSView {
         build()
     }
 
-    private static func makeBackdrop() -> NSView {
-        if #available(macOS 26, *) {
-            let glass = NSGlassEffectView()
-            glass.style = .regular
-            glass.cornerRadius = cornerRadius
-            return glass
-        }
-        let blur = NSVisualEffectView()
-        blur.material = .hudWindow
-        blur.blendingMode = .behindWindow
-        blur.state = .active
-        blur.wantsLayer = true
-        blur.layer?.cornerRadius = cornerRadius
-        blur.layer?.masksToBounds = true
-        blur.maskImage = backdropMask(radius: cornerRadius)
-        return blur
+    private static func makeBackdrop() -> NSGlassEffectView {
+        let glass = NSGlassEffectView()
+        glass.style = .regular
+        glass.cornerRadius = cornerRadius
+        return glass
     }
 
     required init?(coder: NSCoder) { preconditionFailure("not used") }
-
-    /// A resizable rounded-rect mask for the pre-glass visual-effect view.
-    ///
-    /// `layer.cornerRadius` only clips what *AppKit* draws; the blurred
-    /// backdrop behind an `NSVisualEffectView` is composited by the window
-    /// server and ignores the layer entirely, which is why the HUD used to
-    /// show a square patch of blurred desktop in each corner. `maskImage` is
-    /// the supported way to shape the backdrop itself.
-    private static func backdropMask(radius: CGFloat) -> NSImage {
-        let edge = radius * 2 + 1
-        let image = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { rect in
-            NSColor.black.setFill()
-            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
-            return true
-        }
-        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
-        image.resizingMode = .stretch
-        return image
-    }
 
     private func build() {
         translatesAutoresizingMaskIntoConstraints = false
@@ -105,11 +75,7 @@ final class SwitcherListView: NSView {
         backdrop.translatesAutoresizingMaskIntoConstraints = false
         addSubview(backdrop)
         content.translatesAutoresizingMaskIntoConstraints = false
-        if #available(macOS 26, *), let glass = backdrop as? NSGlassEffectView {
-            glass.contentView = content
-        } else {
-            backdrop.addSubview(content)
-        }
+        backdrop.contentView = content
 
         searchContainer.wantsLayer = true
         searchContainer.layer?.masksToBounds = true

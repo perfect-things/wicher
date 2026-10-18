@@ -9,4 +9,4 @@ notarized, so macOS blocks the first launch of a downloaded copy: open it once, 
 in **System Settings → Privacy & Security → Open Anyway** (or run
 `xattr -dr com.apple.quarantine /Applications/Wicher.app`). The Homebrew install does this for you.
 
-Apple Silicon, macOS 13 or later. Grant Accessibility when prompted, then press **⌥Tab**.
+Apple Silicon, macOS 26 or later. Grant Accessibility when prompted, then press **⌥Tab**.

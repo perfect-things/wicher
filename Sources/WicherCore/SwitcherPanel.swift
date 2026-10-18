@@ -21,9 +21,8 @@ final class SwitcherPanel: NSPanel {
         // drawn into the window, so the window's own shadow is computed from a
         // fully transparent rectangle and shows up as a thin square outline
         // around the rounded glass. The glass carries its own edge and depth,
-        // as in the system switcher. The pre-glass blur draws a rounded mask
-        // into the window, so its shadow follows the shape and is kept.
-        if #available(macOS 26, *) { hasShadow = false } else { hasShadow = true }
+        // as in the system switcher.
+        hasShadow = false
         hidesOnDeactivate = false
         isMovable = false
         animationBehavior = .utilityWindow

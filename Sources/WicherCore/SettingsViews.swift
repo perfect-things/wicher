@@ -255,7 +255,7 @@ private struct ShortcutField: View {
             if recorder.isRecording { button.buttonStyle(.borderedProminent) } else { button.buttonStyle(.bordered) }
         }
         .help("Click, then press the new shortcut. Esc cancels.")
-        .onChange(of: combo) { if !recorder.isRecording { recorder.combo = $0 } }
+        .onChange(of: combo) { _, new in if !recorder.isRecording { recorder.combo = new } }
         .onDisappear(perform: recorder.stopRecording)   // card removed or window closed
     }
 

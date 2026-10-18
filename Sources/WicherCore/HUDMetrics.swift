@@ -27,7 +27,7 @@ struct HUDMetrics: Equatable {
     /// Transparent space between the panel window's edge and the visible
     /// panel. Liquid Glass renders a soft edge slightly *outside* its bounds;
     /// with the window cut flush to the glass, the window's square corners
-    /// clipped that edge into visible patches. Zero for the pre-glass blur.
+    /// clipped that edge into visible patches.
     let windowMargin: CGFloat
     /// The panel window's size for a given visible panel height.
     func windowSize(panelHeight: CGFloat) -> CGSize {
@@ -86,10 +86,7 @@ struct HUDMetrics: Equatable {
         )
     }
 
-    static var glassWindowMargin: CGFloat {
-        if #available(macOS 26, *) { return 24 }
-        return 0
-    }
+    static let glassWindowMargin: CGFloat = 24
 }
 
 extension Comparable {

@@ -1,9 +1,9 @@
-// swift-tools-version:5.9
+// swift-tools-version:6.2
 import PackageDescription
 
 let package = Package(
     name: "wicher",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v26)],
     targets: [
         // Everything but the entry point, so tests can import it.
         .target(
@@ -20,5 +20,8 @@ let package = Package(
             dependencies: ["WicherCore"],
             path: "Tests/WicherCoreTests"
         ),
-    ]
+    ],
+    // Swift 6 mode turns the strict-concurrency warnings into errors; the
+    // @MainActor annotations come first (REVIEW-TASKS.md).
+    swiftLanguageModes: [.v5]
 )

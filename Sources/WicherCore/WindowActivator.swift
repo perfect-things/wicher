@@ -66,14 +66,8 @@ enum WindowActivator {
         AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString)
     }
 
-    /// `.activateIgnoringOtherApps` is deprecated from macOS 14 and has no
-    /// effect there; `activate()` is the replacement.
     private static func bringToFront(_ app: NSRunningApplication?) {
-        if #available(macOS 14, *) {
-            app?.activate()
-        } else {
-            app?.activate(options: [.activateIgnoringOtherApps])
-        }
+        app?.activate()
     }
 
     /// Reproduce a Dock-icon click: activate, and ask the app to reopen a window.
@@ -96,8 +90,8 @@ enum WindowActivator {
 
 private protocol SelfActivating { func activateIgnoringOtherApps() }
 
-@available(macOS, deprecated: 14)
 extension NSApplication: SelfActivating {
+    @available(macOS, deprecated: 14)
     fileprivate func activateIgnoringOtherApps() { activate(ignoringOtherApps: true) }
 }
 
