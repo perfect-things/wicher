@@ -76,20 +76,61 @@ Swift 5 language mode; see the `@MainActor` task.
   - `ProfileRows` (line 198): `let _ = recording` exists only to force a redraw. Drop it
     once the shortcut notes live in the model (see High).
 
-- [ ] **Move the Settings models to `@Observable`.**
+- [ ] **Make `Settings` observable and move the Settings UI to Observation.**
   `SettingsModel` and `ShortcutRecorder` use `ObservableObject`. Every `Settings.didChange`
   sends `objectWillChange`, which redraws every view holding the model, including
-  `AboutPane` and `SettingsSidebar` on each slider tick.
+  `AboutPane` and `SettingsSidebar` on each slider tick. Bindings are hand-made closures
+  (`SettingsModel.binding(_:)`, `profile(_:)`) because `Settings` can't be observed.
+  - `Settings` (Settings.swift): mark it `@Observable` and turn each UserDefaults-backed
+    computed property into a stored one. Load it from `defaults` in `init` (after
+    `register(defaults:)`, keeping the current clamping), and persist it plus `post(_:)` the
+    change in `didSet`. Observation only tracks stored properties, so this is what makes
+    per-property updates work. Clamp on set: a `didSet` that reassigns the clamped value
+    when it differs.
+  - Fold the `profiles` cache into the stored `profiles` property. Keep the
+    defaults-on-empty behaviour, and persist the generated defaults so their UUIDs are
+    stable across launches.
+  - Keep `Settings.didChange` for now, since `AppController` still listens to it.
+    Replacing it is the next task.
+  - Keep `Settings(defaults:)` working for the tests, and add tests that a set clamps,
+    persists and posts.
+  - `SettingsModel`: drop `binding(_:)` and `objectWillChange`. Panes bind directly with
+    `@Bindable var settings = Settings.shared` and `$settings.iconSize`. Profile rows bind to
+    `$settings.profiles[i]` or a by-id lookup on the observable model, not
+    `Binding(get:set:)`. What is left in the model (pane selection, login item, shortcut
+    notes, version) becomes `@Observable @MainActor`.
+  - `ValueSlider` (line 310): keep the Int↔Double snapping in a small writable computed
+    property or extension rather than an inline `Binding(get:set:)`.
   - `ShortcutRecorder`: make it `@Observable @MainActor` and hold it in
     `@State private var recorder`. Do this together with the `wire()` fix above.
-  - `SettingsModel`: `@Observable` only tracks its own stored properties, and the settings
-    live in `Settings.shared`. Either add a stored revision counter that is bumped on
-    `didChange` and read by the views that depend on settings, or make `Settings` itself
-    observable. Decide which before starting.
-  - Pass the model to child panes with `@Bindable` or plain `let` instead of
-    `@ObservedObject`.
+  - Pass models to child panes as `let` or `@Bindable` instead of `@ObservedObject`.
   - `SwitchersPane` (line 158): `ForEach(model.profiles.enumerated(), id: \.element.id)`
     no longer needs the `Array(...)` wrapper.
+  - Afterwards: the same-value slider task below mostly goes away. Observation skips
+    redraws for equal `Equatable` values, but `didSet` still runs, so guard there to avoid
+    redundant UserDefaults writes and `didChange` posts.
+
+- [ ] **Replace `Settings.didChange` with Observation.** Do this after `Settings` is observable.
+  Observation is part of Swift, not SwiftUI, so the AppKit code can watch `Settings`
+  directly. After the task above, the only listener left is
+  `AppController.observeSettings` (AppController.swift:133).
+  - Replace it with one `Observations` loop per concern, each in a `Task { @MainActor in … }`
+    started from `applicationDidFinishLaunching`:
+    - hot keys: `Observations { Settings.shared.profiles.map(\.combo) }` →
+      `registerHotKeys()`. This fires only when shortcuts change, so it also covers the
+      "skip the hot-key reload" task (handlers must then look profiles up by id; see High).
+    - appearance: `Observations { Settings.shared.appearanceMode }` →
+      `AppearanceManager.apply`
+    - menu-bar icon: `Observations { Settings.shared.showMenuBarIcon }` →
+      `statusItem?.isVisible`
+  - `Observations` delivers on a later main-loop turn, not inside the setter like the
+    notification does. That is fine for these three; check nothing else relies on the
+    synchronous delivery.
+  - Then delete `Settings.didChange`, `changeKey`, `Settings.Change` and `post(_:)`.
+  - Update `LiveUpdateTests.swift:86`, which asserts the posted `Change` values, to assert
+    the observed values instead.
+  - Update the "Config" paragraph in CLAUDE.md, which describes setters posting
+    `Settings.didChange`.
 
 - [ ] **Add `@MainActor` to the UI types.**
   The package compiles in Swift 5 mode (`swiftLanguageModes: [.v5]` in Package.swift). With
