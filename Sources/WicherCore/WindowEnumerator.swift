@@ -846,17 +846,17 @@ final class WindowEnumerator {
 
     private func installObservers(for apps: [NSRunningApplication]) {
         let selfPID = ProcessInfo.processInfo.processIdentifier
-        let pids = apps
+        let apps = apps
             .filter { $0.activationPolicy != .prohibited && !$0.isTerminated && $0.processIdentifier != selfPID }
-            .map(\.processIdentifier)
-            .filter { observers[$0] == nil }
-        guard !pids.isEmpty else { return }
+            .filter { observers[$0.processIdentifier] == nil }
+        guard !apps.isEmpty else { return }
 
         // Attaching to a sleeping app can block, so do it off the main thread.
         scanQueue.async { [weak self] in
             guard let self else { return }
             let refcon = Unmanaged.passUnretained(self).toOpaque()
-            for pid in pids {
+            for app in apps {
+                let pid = app.processIdentifier
                 var observer: AXObserver?
                 guard AXObserverCreate(pid, Self.observerCallback, &observer) == .success,
                       let observer else { continue }
@@ -875,7 +875,10 @@ final class WindowEnumerator {
                     Self.observeDestruction(of: windows, with: observer, refcon: refcon)
                 }
                 DispatchQueue.main.async {
-                    guard self.observers[pid] == nil else { return }
+                    // The app may have quit while we were attaching; its
+                    // `removeObserver` has already run, and storing this one
+                    // would block a later app that reuses the pid.
+                    guard self.observers[pid] == nil, !app.isTerminated else { return }
                     self.observers[pid] = observer
                     CFRunLoopAddSource(CFRunLoopGetMain(),
                                        AXObserverGetRunLoopSource(observer),

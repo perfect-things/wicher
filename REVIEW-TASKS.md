@@ -39,7 +39,7 @@ Swift 5 language mode; see the `@MainActor` task.
 
 ## Medium
 
-- [ ] **Don't store AX observers for apps that have already quit.**
+- [x] **Don't store AX observers for apps that have already quit.**
   `installObservers` (WindowEnumerator.swift:835) creates observers on `scanQueue` and
   stores them on main later. If the app quits in between, `removeObserver` has already run
   and the dead observer is stored. Because pids are reused, `observers[pid] == nil` then
