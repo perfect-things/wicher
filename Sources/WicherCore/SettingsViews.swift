@@ -62,6 +62,7 @@ struct SettingsDetail: View {
 private struct GeneralPane: View {
     @ObservedObject var model: SettingsModel
     @State private var copied = false
+    @State private var collecting = false
 
     var body: some View {
         Form {
@@ -86,20 +87,28 @@ private struct GeneralPane: View {
             Section("Troubleshooting") {
                 LabeledContent {
                     Button(copied ? "Copied ✓" : "Copy Diagnostics") { copyDiagnostics() }
+                    .disabled(collecting)
                 } label: {
                     SettingLabel("Diagnostics", hint: "If a window is missing or mislabelled in the switcher, this copies what macOS reports about every app's windows to the clipboard, for a bug report.")
                 }
             }
         }
         .formStyle(.grouped)
+        .task(id: copied) {
+            guard copied else { return }
+            try? await Task.sleep(for: .seconds(1.5))
+            copied = false
+        }
     }
 
     private func copyDiagnostics() {
-        let report = WindowEnumerator.shared.diagnosticsReport()
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(report, forType: .string)
-        copied = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+        collecting = true
+        WindowEnumerator.shared.diagnosticsReport { report in
+            collecting = false
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(report, forType: .string)
+            copied = true
+        }
     }
 }
 

@@ -7,7 +7,7 @@ Swift 5 language mode; see the `@MainActor` task.
 
 ## High
 
-- [ ] **Run Copy Diagnostics off the main thread.**
+- [x] **Run Copy Diagnostics off the main thread.**
   `WindowEnumerator.diagnosticsReport()` (WindowEnumerator.swift:716) asks every regular app
   for its windows one at a time, waiting up to 1 s each, on the main thread. One stuck or
   napping app freezes Settings with a beachball.

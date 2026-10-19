@@ -713,7 +713,19 @@ final class WindowEnumerator {
     /// interesting cases (a hidden app, a full-screen app on another Space) are
     /// exactly the ones that cannot be reproduced from a shell. This is how to
     /// see the ground truth on a real machine: Settings → General → Copy Diagnostics.
-    func diagnosticsReport() -> String {
+    ///
+    /// Asks every regular app in turn, up to `backgroundTimeout` each, so it is
+    /// built on the scan queue — one stuck app would otherwise beachball Settings.
+    /// `completion` runs on the main thread.
+    func diagnosticsReport(completion: @escaping (String) -> Void) {
+        scanQueue.async { [weak self] in
+            guard let self else { return }
+            let report = self.buildDiagnosticsReport()
+            DispatchQueue.main.async { completion(report) }
+        }
+    }
+
+    private func buildDiagnosticsReport() -> String {
         var out = ""
         out += "wicher diagnostics — \(Date())\n"
         out += "AXIsProcessTrusted: \(AXIsProcessTrusted())\n"
