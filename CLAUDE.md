@@ -133,10 +133,12 @@ others Tab/Shift-Tab skipped controls or never got back to the sidebar.
 
 Config: `Settings` (UserDefaults, loaded once in `init`; globals) + `SwitcherProfile`
 (Codable, JSON-encoded into UserDefaults; per-switcher scope/Spaces/placement +
-shortcut). Every `didSet` clamps, persists and posts `Settings.didChange` with a
-`Settings.Change` — only when the value really changed;
-`AppController` re-registers hot keys (and re-applies the system override) on
-`.profiles` and applies `.appearance`. `HotKeyCombo.reverse` is nil for a combo with
+shortcut). `Settings` is `@Observable`; every `didSet` clamps and persists, only when
+the value really changed. There is no change notification: AppKit code watches what it
+needs with `Settings.observe` (an `Observations` loop, delivered on a later main-loop
+turn) — `AppController` re-registers hot keys (and re-applies the system override) when
+the shortcuts change, and applies the appearance and menu-bar icon; `SettingsModel`
+refreshes the shortcut notes. `HotKeyCombo.reverse` is nil for a combo with
 Shift. In the panel, `handleKeyDown` subtracts the trigger's modifiers, so ⌘-held typing
 searches when the shortcut is ⌘Tab.
 `HUDMetrics.make(iconSize:textSize:rowPadding:)` derives every pixel dimension — don't

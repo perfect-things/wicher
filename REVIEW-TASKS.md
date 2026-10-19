@@ -110,7 +110,7 @@ Swift 5 language mode; see the `@MainActor` task.
     redraws for equal `Equatable` values, but `didSet` still runs, so guard there to avoid
     redundant UserDefaults writes and `didChange` posts.
 
-- [ ] **Replace `Settings.didChange` with Observation.** Do this after `Settings` is observable.
+- [x] **Replace `Settings.didChange` with Observation.** Do this after `Settings` is observable.
   Observation is part of Swift, not SwiftUI, so the AppKit code can watch `Settings`
   directly. After the task above, the only listener left is
   `AppController.observeSettings` (AppController.swift:133).

@@ -78,21 +78,15 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(settings.showDelayMs, 0)
     }
 
-    func testProfilesRoundTripAndPostChange() {
+    func testProfilesRoundTripAndAreObserved() {
         let settings = Settings(defaults: defaults)
         XCTAssertEqual(settings.profiles.count, SwitcherProfile.defaults().count)
 
-        var changes: [Settings.Change] = []
-        let token = NotificationCenter.default.addObserver(forName: Settings.didChange, object: settings,
-                                                           queue: nil) { note in
-            if let change = note.userInfo?[Settings.changeKey] as? Settings.Change { changes.append(change) }
-        }
-        defer { NotificationCenter.default.removeObserver(token) }
-
         let one = [profile()]
-        settings.profiles = one
-        settings.appearanceMode = .dark
-        XCTAssertEqual(changes, [.profiles, .appearance])
+        XCTAssertTrue(changes(of: { _ = settings.profiles }) { settings.profiles = one })
+        XCTAssertTrue(changes(of: { _ = settings.appearanceMode }) { settings.appearanceMode = .dark })
+        XCTAssertFalse(changes(of: { _ = settings.appearanceMode }) { settings.iconSize = 40 },
+                       "only the properties read are tracked")
         XCTAssertEqual(settings.profiles.map(\.id), one.map(\.id))
         // Persisted, not just cached.
         XCTAssertEqual(Settings(defaults: defaults).profiles.map(\.id), one.map(\.id))
@@ -111,25 +105,23 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(Settings(defaults: defaults).profiles.map(\.id), first)
     }
 
-    func testSetClampsPersistsAndPosts() {
+    func testSetClampsAndPersists() {
         let settings = Settings(defaults: defaults)
-        let changes = recordChanges(of: settings)
-        settings.textSize = 1
+        XCTAssertTrue(changes(of: { _ = settings.textSize }) { settings.textSize = 1 })
         XCTAssertEqual(settings.textSize, HUDMetrics.textRange.lowerBound)
         XCTAssertEqual(Settings(defaults: defaults).textSize, HUDMetrics.textRange.lowerBound)
         settings.showMenuBarIcon = false
         XCTAssertFalse(Settings(defaults: defaults).showMenuBarIcon)
-        XCTAssertEqual(changes.values, [.metrics, .menuBarIcon])
     }
 
-    func testSameValueDoesNotPost() {
+    func testSameValueIsNotObserved() {
         let settings = Settings(defaults: defaults)
-        let changes = recordChanges(of: settings)
-        settings.iconSize = settings.iconSize
-        settings.selectOnHover = settings.selectOnHover
-        settings.profiles = settings.profiles
-        settings[profileID: settings.profiles[0].id] = settings.profiles[0]
-        XCTAssertEqual(changes.values, [])
+        XCTAssertFalse(changes(of: { _ = settings.iconSize; _ = settings.selectOnHover; _ = settings.profiles }) {
+            settings.iconSize = settings.iconSize
+            settings.selectOnHover = settings.selectOnHover
+            settings.profiles = settings.profiles
+            settings[profileID: settings.profiles[0].id] = settings.profiles[0]
+        })
     }
 
     func testProfileSubscriptSurvivesRemoval() {
@@ -146,15 +138,13 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(settings.profiles.map(\.id), [renamed.id])
     }
 
-    private final class Changes { var values: [Settings.Change] = [] }
+    private final class Flag { var value = false }
 
-    private func recordChanges(of settings: Settings) -> Changes {
-        let changes = Changes()
-        let token = NotificationCenter.default.addObserver(forName: Settings.didChange, object: settings,
-                                                           queue: nil) { note in
-            if let change = note.userInfo?[Settings.changeKey] as? Settings.Change { changes.values.append(change) }
-        }
-        addTeardownBlock { NotificationCenter.default.removeObserver(token) }
-        return changes
+    /// Whether `write` changes anything `read` reads, as Observation sees it.
+    private func changes(of read: () -> Void, after write: () -> Void) -> Bool {
+        let fired = Flag()
+        withObservationTracking(read) { fired.value = true }
+        write()
+        return fired.value
     }
 }

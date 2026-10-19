@@ -4,22 +4,14 @@ import AppKit
 /// Per-switcher filter options live on each `SwitcherProfile`; this holds the
 /// global, cross-switcher preferences.
 ///
-/// `@Observable`, so SwiftUI binds straight to it and redraws only what reads
-/// a changed property. Every value is loaded from `defaults` once, in `init`,
-/// and each `didSet` clamps, persists and posts `Settings.didChange` (on the
-/// main thread, with the changed `Settings.Change` under `changeKey`) — but
-/// only when the value really changed. A `defaults write` while wicher runs
-/// is therefore not picked up.
+/// `@Observable`: SwiftUI binds straight to it, and AppKit code watches the
+/// properties it cares about with `Observations` (see `AppController`). Every
+/// value is loaded from `defaults` once, in `init`, and each `didSet` clamps
+/// and persists — only when the value really changed. A `defaults write`
+/// while wicher runs is therefore not picked up.
 @Observable
 final class Settings {
     static let shared = Settings()
-
-    static let didChange = Notification.Name("WicherSettingsDidChange")
-    static let changeKey = "change"
-
-    enum Change: String {
-        case appearance, metrics, selection, showDelay, profiles, menuBarIcon
-    }
 
     @ObservationIgnored private let defaults: UserDefaults
 
@@ -78,13 +70,13 @@ final class Settings {
     }
 
     var appearanceMode: AppearanceMode {
-        didSet { store(appearanceMode.rawValue, oldValue.rawValue, Key.appearance, .appearance) }
+        didSet { store(appearanceMode.rawValue, oldValue.rawValue, Key.appearance) }
     }
 
     /// How the switcher draws the selected row. Read by each row when its
     /// selection changes, so a change shows the next time the panel opens.
     var highlightStyle: HighlightStyle {
-        didSet { store(highlightStyle.rawValue, oldValue.rawValue, Key.highlightStyle, .appearance) }
+        didSet { store(highlightStyle.rawValue, oldValue.rawValue, Key.highlightStyle) }
     }
 
     /// Icon size in points; panel width scales from it.
@@ -92,7 +84,7 @@ final class Settings {
         didSet {
             let clamped = iconSize.clamped(to: HUDMetrics.iconRange)
             if clamped != iconSize { iconSize = clamped; return }
-            store(iconSize, oldValue, Key.iconSize, .metrics)
+            store(iconSize, oldValue, Key.iconSize)
         }
     }
 
@@ -101,7 +93,7 @@ final class Settings {
         didSet {
             let clamped = textSize.clamped(to: HUDMetrics.textRange)
             if clamped != textSize { textSize = clamped; return }
-            store(textSize, oldValue, Key.textSize, .metrics)
+            store(textSize, oldValue, Key.textSize)
         }
     }
 
@@ -110,14 +102,14 @@ final class Settings {
         didSet {
             let clamped = panelWidthScale.clamped(to: HUDMetrics.widthScaleRange)
             if clamped != panelWidthScale { panelWidthScale = clamped; return }
-            store(panelWidthScale, oldValue, Key.panelWidthScale, .metrics)
+            store(panelWidthScale, oldValue, Key.panelWidthScale)
         }
     }
 
     /// The app-name column left of each row's icon. Off, rows are just
     /// icon + title. Part of `HUDMetrics`, so it applies on the next open.
     var showAppNames: Bool {
-        didSet { store(showAppNames, oldValue, Key.showAppNames, .metrics) }
+        didSet { store(showAppNames, oldValue, Key.showAppNames) }
     }
 
     /// Vertical padding above/below each row's content, in points.
@@ -125,16 +117,16 @@ final class Settings {
         didSet {
             let clamped = rowPadding.clamped(to: HUDMetrics.paddingRange)
             if clamped != rowPadding { rowPadding = clamped; return }
-            store(rowPadding, oldValue, Key.rowPadding, .metrics)
+            store(rowPadding, oldValue, Key.rowPadding)
         }
     }
 
     var selectOnHover: Bool {
-        didSet { store(selectOnHover, oldValue, Key.hoverSelects, .selection) }
+        didSet { store(selectOnHover, oldValue, Key.hoverSelects) }
     }
 
     var selectOnScroll: Bool {
-        didSet { store(selectOnScroll, oldValue, Key.scrollSelects, .selection) }
+        didSet { store(selectOnScroll, oldValue, Key.scrollSelects) }
     }
 
     /// Delay before the panel is drawn. A quick tap+release within this window
@@ -142,13 +134,13 @@ final class Settings {
     var showDelayMs: Int {
         didSet {
             if showDelayMs < 0 { showDelayMs = 0; return }
-            store(showDelayMs, oldValue, Key.showDelayMs, .showDelay)
+            store(showDelayMs, oldValue, Key.showDelayMs)
         }
     }
 
     /// Hidden, wicher keeps running; opening the app again shows Settings.
     var showMenuBarIcon: Bool {
-        didSet { store(showMenuBarIcon, oldValue, Key.showMenuBarIcon, .menuBarIcon) }
+        didSet { store(showMenuBarIcon, oldValue, Key.showMenuBarIcon) }
     }
 
     /// Never empty: setting `[]` puts the default switchers back.
@@ -157,7 +149,6 @@ final class Settings {
             if profiles.isEmpty { profiles = SwitcherProfile.defaults(); return }
             guard profiles != oldValue else { return }
             persist(profiles: profiles)
-            post(.profiles)
         }
     }
 
@@ -172,10 +163,9 @@ final class Settings {
         }
     }
 
-    private func store<T: Equatable>(_ value: T, _ oldValue: T, _ key: String, _ change: Change) {
+    private func store<T: Equatable>(_ value: T, _ oldValue: T, _ key: String) {
         guard value != oldValue else { return }
         defaults.set(value, forKey: key)
-        post(change)
     }
 
     private func persist(profiles: [SwitcherProfile]) {
@@ -183,10 +173,16 @@ final class Settings {
             defaults.set(data, forKey: Key.profiles)
         }
     }
+}
 
-    private func post(_ change: Change) {
-        let post = { NotificationCenter.default.post(name: Self.didChange, object: self,
-                                                      userInfo: [Self.changeKey: change]) }
-        if Thread.isMainThread { post() } else { DispatchQueue.main.async(execute: post) }
+extension Settings {
+    /// Calls `apply` on the main actor whenever `value` changes, for as long
+    /// as the app runs. Not with the current value: callers set things up
+    /// from it themselves at launch. Delivery is on a later main-loop turn.
+    static func observe<T: Sendable>(_ value: @escaping @Sendable () -> T,
+                                     _ apply: @escaping @MainActor (T) -> Void) {
+        Task { @MainActor in
+            for await new in Observations(value).dropFirst() { apply(new) }
+        }
     }
 }

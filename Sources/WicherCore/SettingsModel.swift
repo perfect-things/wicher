@@ -48,12 +48,10 @@ final class SettingsModel {
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
 
     init() {
-        let center = NotificationCenter.default
-        observers.append(center.addObserver(forName: Settings.didChange, object: Settings.shared,
-                                            queue: .main) { [weak self] note in
-            guard note.userInfo?[Settings.changeKey] as? Settings.Change == .profiles else { return }
+        Settings.observe({ Settings.shared.profiles.map(\.combo) }) { [weak self] _ in
             self?.refreshShortcutNotes()
-        })
+        }
+        let center = NotificationCenter.default
         // Approval happens in System Settings; pick it up when the user comes back.
         observers.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil,
                                             queue: .main) { [weak self] _ in

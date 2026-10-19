@@ -133,15 +133,16 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     // MARK: - Settings
 
+    /// One `Observations` loop per concern. They deliver on a later main-loop
+    /// turn, not inside the setter, which none of these needs.
     private func observeSettings() {
-        NotificationCenter.default.addObserver(forName: Settings.didChange, object: Settings.shared,
-                                               queue: .main) { [weak self] note in
-            switch note.userInfo?[Settings.changeKey] as? Settings.Change {
-            case .profiles: self?.registerHotKeys()
-            case .appearance: AppearanceManager.apply(Settings.shared.appearanceMode)
-            case .menuBarIcon: self?.statusItem?.isVisible = Settings.shared.showMenuBarIcon
-            default: break
-            }
+        // Only the shortcuts: a filter change needs no reload (see `hotKeyFired`).
+        Settings.observe({ Settings.shared.profiles.map(\.combo) }) { [weak self] _ in
+            self?.registerHotKeys()
+        }
+        Settings.observe({ Settings.shared.appearanceMode }) { AppearanceManager.apply($0) }
+        Settings.observe({ Settings.shared.showMenuBarIcon }) { [weak self] visible in
+            self?.statusItem?.isVisible = visible
         }
     }
 
