@@ -9,6 +9,9 @@ final class AppController: NSObject, NSApplicationDelegate {
     private let switcher = SwitcherController()
     private let settings = SettingsWindow()
     private var hotKeyIDs: [UInt32] = []
+    /// The shortcuts behind `hotKeyIDs`, by profile, so a `.profiles` change
+    /// that leaves them alone (a filter picker) skips the reload.
+    private var registeredCombos: [UUID: HotKeyCombo]?
     private var accessibilityItem: NSMenuItem?
     private var trustTimer: Timer?
     private var isTrusted = AXIsProcessTrusted()
@@ -144,29 +147,43 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     // MARK: - Hot keys (one forward + one reverse per profile)
 
+    /// Re-registers only when a shortcut was added, removed or changed: the
+    /// system-table check behind `SystemHotKeyOverride.apply` costs ≈13 ms.
     private func registerHotKeys() {
+        let profiles = Settings.shared.profiles
+        let combos = Dictionary(profiles.map { ($0.id, $0.combo) }, uniquingKeysWith: { first, _ in first })
+        guard combos != registeredCombos else { return }
+        registeredCombos = combos
+
         hotKeyIDs.forEach { HotKeyCenter.shared.unregister($0) }
         hotKeyIDs.removeAll()
 
         // A shortcut the system owns (⌘Tab) only reaches us once the system's
         // own hot key is switched off; see `SystemHotKeys`.
-        let profiles = Settings.shared.profiles
         SystemHotKeyOverride.shared.apply(for: profiles.flatMap { [$0.combo] + ($0.combo.reverse.map { [$0] } ?? []) })
 
         for profile in profiles {
-            if let id = HotKeyCenter.shared.register(profile.combo, handler: { [weak self] pressed in
-                self?.switcher.hotKey(profile: profile, forward: true, pressed: pressed)
+            let id = profile.id
+            if let hotKey = HotKeyCenter.shared.register(profile.combo, handler: { [weak self] pressed in
+                self?.hotKeyFired(profileID: id, forward: true, pressed: pressed)
             }) {
-                hotKeyIDs.append(id)
+                hotKeyIDs.append(hotKey)
             }
             // A combo that already holds Shift has no distinct reverse chord.
             guard let reverse = profile.combo.reverse else { continue }
-            if let id = HotKeyCenter.shared.register(reverse, handler: { [weak self] pressed in
-                self?.switcher.hotKey(profile: profile, forward: false, pressed: pressed)
+            if let hotKey = HotKeyCenter.shared.register(reverse, handler: { [weak self] pressed in
+                self?.hotKeyFired(profileID: id, forward: false, pressed: pressed)
             }) {
-                hotKeyIDs.append(id)
+                hotKeyIDs.append(hotKey)
             }
         }
+    }
+
+    /// Looks the profile up when the key fires, so filter changes made since
+    /// registration apply without re-registering.
+    private func hotKeyFired(profileID: UUID, forward: Bool, pressed: Bool) {
+        guard let profile = Settings.shared.profiles.first(where: { $0.id == profileID }) else { return }
+        switcher.hotKey(profile: profile, forward: forward, pressed: pressed)
     }
 
     // MARK: - App activation tracking (MRU)

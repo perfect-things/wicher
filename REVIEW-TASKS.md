@@ -18,7 +18,7 @@ Swift 5 language mode; see the `@MainActor` task.
     report runs. Replace `DispatchQueue.main.asyncAfter` with
     `.task(id: copied) { try? await Task.sleep(for: .seconds(1.5)); copied = false }`.
 
-- [ ] **Skip the hot-key reload when shortcuts haven't changed.**
+- [x] **Skip the hot-key reload when shortcuts haven't changed.**
   Every `.profiles` change, including a filter picker change, runs
   `AppController.registerHotKeys` (AppController.swift:147), which calls
   `SystemHotKeyOverride.apply`. That checks the 512-entry system shortcut table once per

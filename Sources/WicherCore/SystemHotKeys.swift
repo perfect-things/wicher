@@ -68,11 +68,23 @@ enum SystemHotKeys {
     /// Enabled system hot keys that claim `combo`. Empty when the private API
     /// is unavailable.
     static func enabledConflicts(with combo: HotKeyCombo) -> [Int32] {
+        enabledConflicts(with: [combo]).sorted()
+    }
+
+    /// Enabled system hot keys that claim any of `combos`. Reads the system
+    /// table once (≈13 ms), however many combos there are.
+    static func enabledConflicts(with combos: [HotKeyCombo]) -> Set<Int32> {
+        guard !combos.isEmpty else { return [] }
+        return Set(enabledBindings().filter { system in combos.contains { binding(system, matches: $0) } }.map(\.id))
+    }
+
+    /// Every enabled system hot key. Empty when the private API is unavailable.
+    private static func enabledBindings() -> [Binding] {
         guard let functions else { return [] }
-        return idRange.filter { id in
+        return idRange.compactMap { id in
             var character: UInt16 = 0, keyCode: UInt16 = 0, modifiers: UInt32 = 0
-            guard functions.get(id, &character, &keyCode, &modifiers) == 0, functions.isEnabled(id) else { return false }
-            return binding(Binding(id: id, keyCode: keyCode, modifiers: modifiers), matches: combo)
+            guard functions.get(id, &character, &keyCode, &modifiers) == 0, functions.isEnabled(id) else { return nil }
+            return Binding(id: id, keyCode: keyCode, modifiers: modifiers)
         }
     }
 
@@ -150,7 +162,7 @@ final class SystemHotKeyOverride {
     /// Switches off exactly the system hot keys that `combos` claim, and turns
     /// back on any wicher switched off before that are no longer claimed.
     func apply(for combos: [HotKeyCombo]) {
-        let needed = Set(combos.flatMap(SystemHotKeys.enabledConflicts(with:)))
+        let needed = SystemHotKeys.enabledConflicts(with: combos)
             .union(Set(disabled).filter { id in combos.contains { claims(id, $0) } })
         for id in Set(disabled).subtracting(needed) { SystemHotKeys.setEnabled(id, true) }
         // Persist first, so a crash between the two leaves a record to undo.
