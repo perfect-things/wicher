@@ -158,7 +158,7 @@ language mode since the `@MainActor` task.
   the pane on every drag tick, even when the snapped value hasn't changed. Add
   `guard snapped != value` in the setter.
 
-- [ ] **Merge cached titles instead of overwriting them.**
+- [x] **Merge cached titles instead of overwriting them.**
   `reconcile` (WindowEnumerator.swift:269–363) copies `caches.titles`, releases the lock,
   and writes the copy back later. Titles from a background scan that finished in between
   are lost until the next scan. Merge into the current value under the lock instead.

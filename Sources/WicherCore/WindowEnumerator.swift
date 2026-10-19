@@ -279,8 +279,10 @@ final class WindowEnumerator: @unchecked Sendable {
 
         lock.lock()
         let selfWindows = selfWindowsCache
-        var titles = caches.titles
+        let cachedTitleIDs = Set(caches.titles.keys)
         lock.unlock()
+        // Titles learned here, merged into `caches.titles` at the end.
+        var freshTitles: [CGWindowID: String] = [:]
 
         var windows: [WindowInfo] = []
         var seen = Set<CGWindowID>()
@@ -303,7 +305,7 @@ final class WindowEnumerator: @unchecked Sendable {
                 guard let fresh = frontWindows[wid] else { continue }
                 minimized = fresh.minimized
                 element = fresh.element
-                if !fresh.title.isEmpty { title = fresh.title; titles[wid] = fresh.title }
+                if !fresh.title.isEmpty { title = fresh.title; freshTitles[wid] = fresh.title }
             }
 
             if let wid = window.cgWindowID { seen.insert(wid) }
@@ -340,7 +342,7 @@ final class WindowEnumerator: @unchecked Sendable {
                                                                           minimized: window.minimized,
                                                                           hidden: isHidden,
                                                                           currentSpace: currentSpace)))
-                titles[wid] = window.title
+                freshTitles[wid] = window.title
             }
         }
 
@@ -369,8 +371,12 @@ final class WindowEnumerator: @unchecked Sendable {
                                                  isAppOnly: true))
         }
 
+        // Merge, don't overwrite: a background scan may have stored titles
+        // since we read the cache, and they'd be lost until the next scan.
+        // Only entries for windows seen closed here are dropped.
         lock.lock()
-        caches.titles = titles.filter { live.contains($0.key) }
+        caches.titles.merge(freshTitles) { _, fresh in fresh }
+        for wid in cachedTitleIDs where !live.contains(wid) { caches.titles[wid] = nil }
         lock.unlock()
 
         return Snapshot(windows: windows,
