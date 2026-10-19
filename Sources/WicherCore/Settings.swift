@@ -9,7 +9,7 @@ import AppKit
 /// value is loaded from `defaults` once, in `init`, and each `didSet` clamps
 /// and persists — only when the value really changed. A `defaults write`
 /// while wicher runs is therefore not picked up.
-@Observable
+@Observable @MainActor
 final class Settings {
     static let shared = Settings()
 
@@ -179,8 +179,8 @@ extension Settings {
     /// Calls `apply` on the main actor whenever `value` changes, for as long
     /// as the app runs. Not with the current value: callers set things up
     /// from it themselves at launch. Delivery is on a later main-loop turn.
-    static func observe<T: Sendable>(_ value: @escaping @Sendable () -> T,
-                                     _ apply: @escaping @MainActor (T) -> Void) {
+    static func observe<T: Sendable>(_ value: @escaping @MainActor @Sendable () -> T,
+                                     _ apply: @escaping @MainActor @Sendable (T) -> Void) {
         Task { @MainActor in
             for await new in Observations(value).dropFirst() { apply(new) }
         }

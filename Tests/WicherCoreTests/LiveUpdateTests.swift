@@ -56,12 +56,14 @@ final class LiveUpdateTests: XCTestCase {
     }
 }
 
+@MainActor
 final class SettingsTests: XCTestCase {
-    private var defaults: UserDefaults!
+    // Read by the nonisolated setUp/tearDown too; XCTest runs those and the
+    // tests one after another on the main thread.
     private let suite = "wicher.tests.settings"
+    nonisolated(unsafe) private let defaults = UserDefaults(suiteName: "wicher.tests.settings")!
 
     override func setUp() {
-        defaults = UserDefaults(suiteName: suite)
         defaults.removePersistentDomain(forName: suite)
     }
 
@@ -138,7 +140,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(settings.profiles.map(\.id), [renamed.id])
     }
 
-    private final class Flag { var value = false }
+    private final class Flag: @unchecked Sendable { var value = false }   // set synchronously, in `write`
 
     /// Whether `write` changes anything `read` reads, as Observation sees it.
     private func changes(of read: () -> Void, after write: () -> Void) -> Bool {

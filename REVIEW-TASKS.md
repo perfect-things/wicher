@@ -2,8 +2,8 @@
 
 Results from a review on 2026-10-18 covering performance, stability, quality and best practices.
 The package targets macOS 26 (since f552226), so the fixes below can use current SwiftUI and
-AppKit APIs, including `@Observable` and `Button(_:systemImage:action:)`. It still compiles in
-Swift 5 language mode; see the `@MainActor` task.
+AppKit APIs, including `@Observable` and `Button(_:systemImage:action:)`. It compiles in Swift 6
+language mode since the `@MainActor` task.
 
 ## High
 
@@ -132,7 +132,7 @@ Swift 5 language mode; see the `@MainActor` task.
   - Update the "Config" paragraph in CLAUDE.md, which describes setters posting
     `Settings.didChange`.
 
-- [ ] **Add `@MainActor` to the UI types.**
+- [x] **Add `@MainActor` to the UI types.**
   The package compiles in Swift 5 mode (`swiftLanguageModes: [.v5]` in Package.swift). With
   `-strict-concurrency=complete` it gave 121 warnings, mostly UI classes not marked
   `@MainActor`.

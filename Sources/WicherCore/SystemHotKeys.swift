@@ -123,6 +123,7 @@ enum SystemHotKeys {
 /// The ids are persisted as soon as they are disabled: the system remembers a
 /// disabled hot key after the process is gone, so if wicher is killed without
 /// a chance to clean up, the next launch re-enables them before anything else.
+@MainActor
 final class SystemHotKeyOverride {
     static let shared = SystemHotKeyOverride()
 

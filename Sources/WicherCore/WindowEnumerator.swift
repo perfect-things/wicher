@@ -1,5 +1,6 @@
 import AppKit
-import ApplicationServices
+// AXObserver/AXUIElement predate Sendable; they cross to the main thread here.
+@preconcurrency import ApplicationServices
 import CoreGraphics
 
 /// The windows discovered in one enumeration pass.
@@ -8,7 +9,7 @@ struct Enumeration {
     let appsWithoutWindows: [WindowInfo]
     let currentSpaceWindowIDs: Set<CGWindowID>
 
-    static let empty = Enumeration(windows: [], appsWithoutWindows: [], currentSpaceWindowIDs: [])
+    static var empty: Enumeration { Enumeration(windows: [], appsWithoutWindows: [], currentSpaceWindowIDs: []) }
 }
 
 extension NSWindow {
@@ -50,7 +51,17 @@ private struct Snapshot {
 /// a low-frequency refresh so a snapshot is almost always warm, and
 /// `enumerate()` serves that snapshot. The cold path (no usable snapshot) still
 /// scans synchronously, but queries every app in parallel rather than serially.
-final class WindowEnumerator {
+///
+/// Concurrency: `@unchecked Sendable`, synchronized by hand rather than by an
+/// actor, because the summon path (`enumerate()`) must stay synchronous. State
+/// is split two ways:
+/// - main-actor: MRU, refresh machinery and the API callers use — marked
+///   `@MainActor`, so the compiler checks it;
+/// - lock-guarded (`lock`): the snapshot and caches, which `performScan`
+///   writes from `scanQueue` and the main thread reads.
+/// Scanning code (`performScan`, `scanApps`, `reconcile`) touches only the
+/// lock-guarded half and immutable configuration.
+final class WindowEnumerator: @unchecked Sendable {
     static let shared = WindowEnumerator()
 
     /// Posted on the main thread after a background scan replaces the snapshot.
@@ -59,13 +70,13 @@ final class WindowEnumerator {
     // MARK: - MRU state (main thread only)
 
     /// Application pids, most-recently-active first.
-    private var mruPIDs: [pid_t] = []
+    @MainActor private var mruPIDs: [pid_t] = []
 
     /// Per-window recency: a monotonically increasing stamp per CGWindowID.
     /// Larger = more recently frontmost. Lets a quick ⌥Tab flip the two most
     /// recent *windows*, not just the two most recent apps.
-    private var windowStamps: [CGWindowID: Int] = [:]
-    private var clock = 0
+    @MainActor private var windowStamps: [CGWindowID: Int] = [:]
+    @MainActor private var clock = 0
 
     // MARK: - Snapshot + caches (lock-guarded, touched from the scan queue)
 
@@ -84,14 +95,14 @@ final class WindowEnumerator {
 
     // MARK: - Refresh machinery (main thread only)
 
-    private var observers: [pid_t: AXObserver] = [:]
-    private var refreshTimer: Timer?
-    private var pendingRefresh: DispatchWorkItem?
-    private var refreshRequestedAt: Date?
-    private var refreshInFlight = false
-    private var refreshAgain = false
-    private var suspended = false
-    private var started = false
+    @MainActor private var observers: [pid_t: AXObserver] = [:]
+    @MainActor private var refreshTimer: Timer?
+    @MainActor private var pendingRefresh: DispatchWorkItem?
+    @MainActor private var refreshRequestedAt: Date?
+    @MainActor private var refreshInFlight = false
+    @MainActor private var refreshAgain = false
+    @MainActor private var suspended = false
+    @MainActor private var started = false
 
     private let scanQueue = DispatchQueue(label: "co.wicher.scan", qos: .userInitiated)
     private let workerQueue = DispatchQueue(label: "co.wicher.scan.workers",
@@ -132,7 +143,7 @@ final class WindowEnumerator {
     // MARK: - Lifecycle
 
     /// Seed MRU, start watching the system, and warm the first snapshot.
-    func start() {
+    @MainActor func start() {
         guard !started else { return }
         started = true
         seedMRU()
@@ -141,7 +152,7 @@ final class WindowEnumerator {
         installObservers(for: NSWorkspace.shared.runningApplications)
 
         let timer = Timer(timeInterval: refreshInterval, repeats: true) { [weak self] _ in
-            self?.refreshIfStale()
+            MainActor.assumeIsolated { self?.refreshIfStale() }   // added to RunLoop.main
         }
         timer.tolerance = refreshInterval / 2
         RunLoop.main.add(timer, forMode: .common)
@@ -154,7 +165,7 @@ final class WindowEnumerator {
     /// ad-hoc rebuild). Observers that failed to attach without trust are
     /// retried, and the snapshot — built from CGWindowList alone, so untitled —
     /// is dropped instead of being served for another refresh cycle.
-    func accessibilityGranted() {
+    @MainActor func accessibilityGranted() {
         installObservers(for: NSWorkspace.shared.runningApplications)
         lock.lock()
         snapshot = nil
@@ -164,7 +175,7 @@ final class WindowEnumerator {
 
     // MARK: - MRU bookkeeping
 
-    func noteActivated(pid: pid_t) {
+    @MainActor func noteActivated(pid: pid_t) {
         mruPIDs.removeAll { $0 == pid }
         mruPIDs.insert(pid, at: 0)
         // Record the app's current frontmost window as the most-recent window.
@@ -173,12 +184,12 @@ final class WindowEnumerator {
     }
 
     /// Record that a specific window just became frontmost.
-    func noteActivatedWindow(_ wid: CGWindowID, pid: pid_t) {
+    @MainActor func noteActivatedWindow(_ wid: CGWindowID, pid: pid_t) {
         noteActivated(pid: pid)
         stampWindow(wid)
     }
 
-    private func stampWindow(_ wid: CGWindowID) {
+    @MainActor private func stampWindow(_ wid: CGWindowID) {
         clock += 1
         windowStamps[wid] = clock
     }
@@ -186,11 +197,11 @@ final class WindowEnumerator {
     /// Refresh only the window stamp for `pid`'s current frontmost window,
     /// without touching the app MRU order. Called at session start so the
     /// window in front is rank 0 and the previous window is rank 1.
-    func noteFrontmost(pid: pid_t) {
+    @MainActor func noteFrontmost(pid: pid_t) {
         if let wid = frontmostWindowID(ofPID: pid) { stampWindow(wid) }
     }
 
-    func seedMRU() {
+    @MainActor func seedMRU() {
         let selfPID = ProcessInfo.processInfo.processIdentifier
         if let front = NSWorkspace.shared.frontmostApplication, front.processIdentifier != selfPID {
             noteActivated(pid: front.processIdentifier)
@@ -210,7 +221,7 @@ final class WindowEnumerator {
     ///
     /// Serves the cached snapshot when one is fresh enough — that is what makes
     /// a summon instant regardless of how long wicher sat idle.
-    func enumerate() -> Enumeration {
+    @MainActor func enumerate() -> Enumeration {
         cacheSelfWindows()
         lock.lock()
         let cached = snapshot
@@ -225,7 +236,7 @@ final class WindowEnumerator {
 
     /// The latest snapshot, MRU-ordered, with no IPC and no refresh scheduled —
     /// for updating an already-open panel after `didRefresh`.
-    func latestSnapshot() -> Enumeration? {
+    @MainActor func latestSnapshot() -> Enumeration? {
         lock.lock()
         let cached = snapshot
         lock.unlock()
@@ -389,7 +400,7 @@ final class WindowEnumerator {
     }
 
     /// Applies the current MRU ordering to a snapshot.
-    private func order(_ snap: Snapshot) -> Enumeration {
+    @MainActor private func order(_ snap: Snapshot) -> Enumeration {
         let ordered = snap.windows.enumerated().sorted { lhs, rhs in
             // 1) window recency (more-recent first), 2) app MRU, 3) stable order.
             let wa = windowRank(lhs.element.cgWindowID)
@@ -407,11 +418,11 @@ final class WindowEnumerator {
                            currentSpaceWindowIDs: snap.currentSpaceWindowIDs)
     }
 
-    private func mruRank(_ pid: pid_t) -> Int { mruPIDs.firstIndex(of: pid) ?? Int.max }
+    @MainActor private func mruRank(_ pid: pid_t) -> Int { mruPIDs.firstIndex(of: pid) ?? Int.max }
 
     /// Lower rank = more recently frontmost. Windows we have never seen stamped
     /// sort after all stamped ones (so app-MRU then breaks the tie).
-    private func windowRank(_ wid: CGWindowID?) -> Int {
+    @MainActor private func windowRank(_ wid: CGWindowID?) -> Int {
         guard let wid, let stamp = windowStamps[wid] else { return Int.max }
         return -stamp  // larger stamp → smaller (earlier) rank
     }
@@ -420,7 +431,7 @@ final class WindowEnumerator {
 
     /// Coalesced background refresh. Several callers (AX notifications, app
     /// activation, the summon path) ask for one at once; only one scan runs.
-    private func scheduleRefresh(after delay: TimeInterval) {
+    @MainActor private func scheduleRefresh(after delay: TimeInterval) {
         guard started, !suspended else { return }
         // A chatty app (title changes while you type) would otherwise push the
         // pending refresh out forever. Once a request has waited this long, let
@@ -439,14 +450,14 @@ final class WindowEnumerator {
         }
     }
 
-    private func refreshIfStale() {
+    @MainActor private func refreshIfStale() {
         lock.lock()
         let age = snapshot.map { Date().timeIntervalSince($0.takenAt) } ?? .greatestFiniteMagnitude
         lock.unlock()
         if age >= refreshInterval { scheduleRefresh(after: 0) }
     }
 
-    private func runRefresh() {
+    @MainActor private func runRefresh() {
         pendingRefresh = nil
         refreshRequestedAt = nil
         guard !suspended else { return }
@@ -540,7 +551,7 @@ final class WindowEnumerator {
     /// that has been idle (App Nap) can take hundreds of milliseconds to answer.
     private func scanApps(_ metas: [AppMeta], timeout: TimeInterval) -> [pid_t: AppScan] {
         guard !metas.isEmpty else { return [:] }
-        var results: [pid_t: AppScan] = [:]
+        nonisolated(unsafe) var results: [pid_t: AppScan] = [:]   // guarded by resultLock
         let resultLock = NSLock()
         let group = DispatchGroup()
         let gate = DispatchSemaphore(value: 16)
@@ -663,7 +674,7 @@ final class WindowEnumerator {
     /// same identifier CGWindowList uses, so Space membership still resolves.
     ///
     /// Main thread only; `NSApp` is not safe to read from the scan queue.
-    private func cacheSelfWindows() {
+    @MainActor private func cacheSelfWindows() {
         let list: [SelfWindow] = NSApp.windows.compactMap { window in
             guard let number = window.cgWindowID,
                   !(window is SwitcherPanel),            // the borderless HUD
@@ -717,7 +728,7 @@ final class WindowEnumerator {
     /// Asks every regular app in turn, up to `backgroundTimeout` each, so it is
     /// built on the scan queue — one stuck app would otherwise beachball Settings.
     /// `completion` runs on the main thread.
-    func diagnosticsReport(completion: @escaping (String) -> Void) {
+    func diagnosticsReport(completion: @escaping @MainActor @Sendable (String) -> Void) {
         scanQueue.async { [weak self] in
             guard let self else { return }
             let report = self.buildDiagnosticsReport()
@@ -770,19 +781,17 @@ final class WindowEnumerator {
 
     // MARK: - Watching the system
 
-    private func cacheScreenSizes() {
+    @MainActor private func cacheScreenSizes() {
         let sizes = NSScreen.screens.map(\.frame.size)
         lock.lock()
         screenSizes = sizes
         lock.unlock()
     }
 
-    private func observeWorkspace() {
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.didChangeScreenParametersNotification,
-            object: nil, queue: .main) { [weak self] _ in
-            self?.cacheScreenSizes()
-            self?.scheduleRefresh(after: 0.1)
+    @MainActor private func observeWorkspace() {
+        observe(NSApplication.didChangeScreenParametersNotification, on: .default) { this, _ in
+            this.cacheScreenSizes()
+            this.scheduleRefresh(after: 0.1)
         }
         let center = NSWorkspace.shared.notificationCenter
         let refreshing: [NSNotification.Name] = [
@@ -791,33 +800,35 @@ final class WindowEnumerator {
             NSWorkspace.activeSpaceDidChangeNotification,
         ]
         for name in refreshing {
-            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                self?.scheduleRefresh(after: 0.1)
-            }
+            observe(name, on: center) { this, _ in this.scheduleRefresh(after: 0.1) }
         }
-        center.addObserver(forName: NSWorkspace.didLaunchApplicationNotification,
-                           object: nil, queue: .main) { [weak self] note in
-            if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
-                self?.installObservers(for: [app])
-            }
-            self?.scheduleRefresh(after: 0.3)
+        observe(NSWorkspace.didLaunchApplicationNotification, on: center) { this, app in
+            if let app { this.installObservers(for: [app]) }
+            this.scheduleRefresh(after: 0.3)
         }
-        center.addObserver(forName: NSWorkspace.didTerminateApplicationNotification,
-                           object: nil, queue: .main) { [weak self] note in
-            if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
-                self?.removeObserver(pid: app.processIdentifier)
-            }
-            self?.scheduleRefresh(after: 0.1)
+        observe(NSWorkspace.didTerminateApplicationNotification, on: center) { this, app in
+            if let app { this.removeObserver(pid: app.processIdentifier) }
+            this.scheduleRefresh(after: 0.1)
         }
         // Don't poke every app while the display is asleep.
-        center.addObserver(forName: NSWorkspace.screensDidSleepNotification,
-                           object: nil, queue: .main) { [weak self] _ in
-            self?.suspended = true
+        observe(NSWorkspace.screensDidSleepNotification, on: center) { this, _ in this.suspended = true }
+        observe(NSWorkspace.screensDidWakeNotification, on: center) { this, _ in
+            this.suspended = false
+            this.scheduleRefresh(after: 0)
         }
-        center.addObserver(forName: NSWorkspace.screensDidWakeNotification,
-                           object: nil, queue: .main) { [weak self] _ in
-            self?.suspended = false
-            self?.scheduleRefresh(after: 0)
+    }
+
+    /// `addObserver(forName:object:queue: .main)`, with the block run on the
+    /// main actor (which `.main` guarantees) and `self` held weakly. The
+    /// handler gets the notification's app, if it names one.
+    @MainActor private func observe(_ name: NSNotification.Name, on center: NotificationCenter,
+                                    _ handler: @escaping @MainActor @Sendable (WindowEnumerator, NSRunningApplication?) -> Void) {
+        center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                handler(self, app)
+            }
         }
     }
 
@@ -831,7 +842,8 @@ final class WindowEnumerator {
             observeDestruction(of: [element], with: observer, refcon: refcon)
         }
         let enumerator = Unmanaged<WindowEnumerator>.fromOpaque(refcon).takeUnretainedValue()
-        enumerator.scheduleRefresh(after: 0.15)
+        // The observer's run-loop source is on the main run loop.
+        MainActor.assumeIsolated { enumerator.scheduleRefresh(after: 0.15) }
     }
 
     /// Registers `kAXUIElementDestroyedNotification` on each window, so closing
@@ -844,7 +856,7 @@ final class WindowEnumerator {
         }
     }
 
-    private func installObservers(for apps: [NSRunningApplication]) {
+    @MainActor private func installObservers(for apps: [NSRunningApplication]) {
         let selfPID = ProcessInfo.processInfo.processIdentifier
         let apps = apps
             .filter { $0.activationPolicy != .prohibited && !$0.isTerminated && $0.processIdentifier != selfPID }
@@ -888,7 +900,7 @@ final class WindowEnumerator {
         }
     }
 
-    private func removeObserver(pid: pid_t) {
+    @MainActor private func removeObserver(pid: pid_t) {
         guard let observer = observers.removeValue(forKey: pid) else { return }
         CFRunLoopRemoveSource(CFRunLoopGetMain(),
                               AXObserverGetRunLoopSource(observer),

@@ -4,6 +4,7 @@ import XCTest
 
 /// The Settings window builds, keeps its minimum size, and titles itself after
 /// the selected pane. With `WICHER_SNAPSHOT_DIR` set, writes a PNG per pane.
+@MainActor
 final class SettingsWindowTests: XCTestCase {
     func testPanesRenderAndRetitleWindow() throws {
         _ = NSApplication.shared

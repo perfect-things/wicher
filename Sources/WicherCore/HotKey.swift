@@ -73,10 +73,11 @@ struct HotKeyCombo: Equatable {
 /// `RegisterEventHotKey` is the same public mechanism Contexts links (observed),
 /// but wicher uses it only to *summon/advance* the switcher — not to swallow
 /// the system Command-Tab, which would require an always-on event tap.
+@MainActor
 final class HotKeyCenter {
     static let shared = HotKeyCenter()
 
-    private var actions: [UInt32: (Bool) -> Void] = [:]
+    private var actions: [UInt32: @MainActor (Bool) -> Void] = [:]
     private var refs: [UInt32: EventHotKeyRef] = [:]
     private var combos: [UInt32: HotKeyCombo] = [:]
     /// While suspended (a shortcut is being recorded), registrations are kept
@@ -87,7 +88,7 @@ final class HotKeyCenter {
 
     private init() { installHandler() }
 
-    deinit {
+    isolated deinit {
         refs.values.forEach { UnregisterEventHotKey($0) }
         if let handlerRef { RemoveEventHandler(handlerRef) }
     }
@@ -113,7 +114,8 @@ final class HotKeyCenter {
                                            &hkID)
             if status == noErr {
                 let pressed = GetEventKind(event) == UInt32(kEventHotKeyPressed)
-                center.actions[hkID.id]?(pressed)
+                // Installed on the application event target: delivered on main.
+                MainActor.assumeIsolated { center.actions[hkID.id]?(pressed) }
             }
             return noErr
         }, 2, &specs, userData, &handlerRef)
@@ -122,7 +124,7 @@ final class HotKeyCenter {
     /// Registers a combo. The handler is called with `true` on press and
     /// `false` on release. Returns an opaque id (nil if the OS rejected it).
     @discardableResult
-    func register(_ combo: HotKeyCombo, handler: @escaping (Bool) -> Void) -> UInt32? {
+    func register(_ combo: HotKeyCombo, handler: @escaping @MainActor (Bool) -> Void) -> UInt32? {
         let id = nextID
         nextID += 1
         if !isSuspended {

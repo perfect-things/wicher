@@ -20,8 +20,5 @@ let package = Package(
             dependencies: ["WicherCore"],
             path: "Tests/WicherCoreTests"
         ),
-    ],
-    // Swift 6 mode turns the strict-concurrency warnings into errors; the
-    // @MainActor annotations come first (REVIEW-TASKS.md).
-    swiftLanguageModes: [.v5]
+    ]
 )

@@ -4,6 +4,7 @@ import Carbon.HIToolbox
 
 /// Owns the menu-bar item and wires together the hot keys, the switcher, the
 /// appearance choice, and the Settings window.
+@MainActor
 final class AppController: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let switcher = SwitcherController()
@@ -210,13 +211,15 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// stand-in — so watch for it, flag it, and recover without a relaunch.
     private func watchAccessibilityTrust() {
         let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            let trusted = AXIsProcessTrusted()
-            guard trusted != self.isTrusted else { return }
-            self.isTrusted = trusted
-            self.updateTrustIndicator()
-            self.settings.model.refreshShortcutNotes()
-            if trusted { WindowEnumerator.shared.accessibilityGranted() }
+            MainActor.assumeIsolated {   // added to RunLoop.main
+                guard let self else { return }
+                let trusted = AXIsProcessTrusted()
+                guard trusted != self.isTrusted else { return }
+                self.isTrusted = trusted
+                self.updateTrustIndicator()
+                self.settings.model.refreshShortcutNotes()
+                if trusted { WindowEnumerator.shared.accessibilityGranted() }
+            }
         }
         timer.tolerance = 1
         RunLoop.main.add(timer, forMode: .common)
@@ -237,7 +240,9 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     private func promptForAccessibilityIfNeeded() {
-        let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+        // `kAXTrustedCheckOptionPrompt`'s value; the global is a `var`, which
+        // Swift 6 won't read from concurrent code.
+        let key = "AXTrustedCheckOptionPrompt"
         let options = [key: true] as CFDictionary
         if !AXIsProcessTrustedWithOptions(options) {
             let alert = NSAlert()

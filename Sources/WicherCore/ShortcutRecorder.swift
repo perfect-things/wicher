@@ -17,7 +17,7 @@ import Carbon.HIToolbox
 ///
 /// A model, not an `NSButton`: the button itself is SwiftUI, so it takes part
 /// in the Form's keyboard focus like the controls around it.
-@Observable
+@Observable @MainActor
 final class ShortcutRecorder {
     var combo: HotKeyCombo {
         didSet { if !isRecording { title = combo.displayString } }
@@ -46,7 +46,7 @@ final class ShortcutRecorder {
         title = combo.displayString
     }
 
-    deinit { stopRecording() }
+    isolated deinit { stopRecording() }
 
     // MARK: - Recording
 
@@ -74,7 +74,7 @@ final class ShortcutRecorder {
         }
         resignObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didResignKeyNotification, object: window, queue: .main
-        ) { [weak self] _ in self?.stopRecording() }
+        ) { [weak self] _ in MainActor.assumeIsolated { self?.stopRecording() } }
     }
 
     func stopRecording() {

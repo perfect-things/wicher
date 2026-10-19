@@ -146,6 +146,14 @@ hardcode row heights or panel widths elsewhere. That includes the corners, which
 concentric: `rowCornerRadius = panelCornerRadius − listInset` (capped at a capsule), with
 `listInset` equal on all four sides.
 
+Swift 6 language mode. The UI types, `Settings`, `HotKeyCenter` and
+`SystemHotKeyOverride` are `@MainActor`. Callbacks the compiler can't see are on the main
+thread (`Timer`s on `RunLoop.main`, `queue: .main` observers, AX/Carbon callbacks whose source
+is on the main run loop) hop with `MainActor.assumeIsolated`, which traps if that's ever
+wrong. `WindowEnumerator` is `@unchecked Sendable` by design (the summon path must stay
+synchronous): its `@MainActor` half is MRU + refresh machinery, the rest is `lock`-guarded
+snapshot/caches written from `scanQueue` — see its doc comment before adding state.
+
 The deployment target is macOS 26, so Liquid Glass is always available — no fallbacks.
 The HUD backdrop is `NSGlassEffectView`, with the search bar and list in its
 `contentView`; it doesn't render in an offscreen snapshot. Glass is composited by the

@@ -8,6 +8,7 @@ import ApplicationServices
 ///   via CGWindowList: reproduce a Dock-icon click, which asks the app to open
 ///   or restore a window (`applicationShouldHandleReopen`). `NSWorkspace`'s
 ///   open-with-reopen does this without relaunching the running instance.
+@MainActor
 enum WindowActivator {
     static func activate(_ info: WindowInfo) {
         let app = NSRunningApplication(processIdentifier: info.pid)
@@ -80,7 +81,8 @@ enum WindowActivator {
         config.activates = true
         // openApplication on an already-running app sends it a reopen event
         // (the Dock-click behavior) instead of launching a second instance.
-        NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in }
+        // No completion: it runs on a background queue, and there is nothing to do.
+        NSWorkspace.shared.openApplication(at: url, configuration: config, completionHandler: nil)
     }
 
     private static func bundleURL(forPID pid: pid_t) -> URL? {
@@ -88,7 +90,7 @@ enum WindowActivator {
     }
 }
 
-private protocol SelfActivating { func activateIgnoringOtherApps() }
+@MainActor private protocol SelfActivating { func activateIgnoringOtherApps() }
 
 extension NSApplication: SelfActivating {
     @available(macOS, deprecated: 14)
@@ -102,6 +104,7 @@ extension NSApplication: SelfActivating {
 /// un-minimize itself is ignored until the app is active). Waiting for
 /// `kAXWindowDeminiaturizedNotification` removes the race; the timeout covers
 /// apps that never send it, and re-applies the un-minimize if it did not take.
+@MainActor
 private final class DeminiaturizeWaiter {
     /// Keeps waiters alive until they finish.
     private static var pending: [ObjectIdentifier: DeminiaturizeWaiter] = [:]
@@ -124,7 +127,8 @@ private final class DeminiaturizeWaiter {
         var observer: AXObserver?
         let callback: AXObserverCallback = { _, _, _, refcon in
             guard let refcon else { return }
-            Unmanaged<DeminiaturizeWaiter>.fromOpaque(refcon).takeUnretainedValue().finish()
+            let waiter = Unmanaged<DeminiaturizeWaiter>.fromOpaque(refcon).takeUnretainedValue()
+            MainActor.assumeIsolated { waiter.finish() }   // source is on the main run loop
         }
         if AXObserverCreate(pid, callback, &observer) == .success, let observer,
            AXObserverAddNotification(observer, window, kAXWindowDeminiaturizedNotification as CFString,

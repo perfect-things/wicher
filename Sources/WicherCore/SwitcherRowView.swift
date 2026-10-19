@@ -1,5 +1,6 @@
 import AppKit
 
+@MainActor
 protocol SwitcherRowViewDelegate: AnyObject {
     func rowHovered(displayIndex: Int)
     func rowClicked(displayIndex: Int)

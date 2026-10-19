@@ -29,7 +29,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
 
 /// What the Settings window needs beyond `Settings` itself, which the panes
 /// bind to directly: the selected pane, login-item state, shortcut notes.
-@Observable
+@Observable @MainActor
 final class SettingsModel {
     var pane: SettingsPane = .general {
         didSet { onPaneChange?(pane) }
@@ -55,11 +55,11 @@ final class SettingsModel {
         // Approval happens in System Settings; pick it up when the user comes back.
         observers.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil,
                                             queue: .main) { [weak self] _ in
-            self?.refreshLoginItem()
+            MainActor.assumeIsolated { self?.refreshLoginItem() }
         })
     }
 
-    deinit { observers.forEach(NotificationCenter.default.removeObserver) }
+    isolated deinit { observers.forEach(NotificationCenter.default.removeObserver) }
 
     /// Login-item state lives in ServiceManagement, not UserDefaults. Waiting
     /// for approval counts as on — `register()` succeeded — and `loginItemHint`

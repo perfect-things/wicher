@@ -3,6 +3,7 @@ import XCTest
 @testable import WicherCore
 
 /// Layout of the pooled, frame-placed list. Rendered offscreen — no panel.
+@MainActor
 final class SwitcherListViewTests: XCTestCase {
     private let metrics = HUDMetrics.make(iconSize: 32, textSize: 16, rowPadding: 7)
 

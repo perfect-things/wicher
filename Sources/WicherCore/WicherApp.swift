@@ -2,6 +2,7 @@ import AppKit
 
 /// The app's entry point, called from the `wicher` executable's main.swift.
 /// Agent app: no Dock icon, lives in the menu bar.
+@MainActor
 public enum WicherApp {
     public static func run() -> Never {
         let app = NSApplication.shared

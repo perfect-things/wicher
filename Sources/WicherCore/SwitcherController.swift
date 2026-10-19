@@ -8,6 +8,7 @@ import Carbon.HIToolbox
 /// What is on offer and what is selected lives in `SwitcherSession`; turning
 /// that into views lives in `SwitcherListView`. This class wires the two to
 /// hot keys, monitors and the panel.
+@MainActor
 final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     private let panel = SwitcherPanel()
     private let listView = SwitcherListView()
@@ -275,11 +276,13 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
         stopHoldTimer()
         holdStart = Date()
         holdTimer = Timer.scheduledTimer(withTimeInterval: holdRepeatInterval, repeats: true) { [weak self] _ in
-            guard let self, self.panelShown, let dir = self.holdDirection else { return }
-            // Honor an initial delay before the auto-repeat kicks in.
-            if Date().timeIntervalSince(self.holdStart) < self.holdInitialDelay { return }
-            // Auto-repeat clamps at the ends; explicit presses wrap.
-            self.advance(by: dir, wrap: false)
+            MainActor.assumeIsolated {   // scheduled on the main run loop
+                guard let self, self.panelShown, let dir = self.holdDirection else { return }
+                // Honor an initial delay before the auto-repeat kicks in.
+                if Date().timeIntervalSince(self.holdStart) < self.holdInitialDelay { return }
+                // Auto-repeat clamps at the ends; explicit presses wrap.
+                self.advance(by: dir, wrap: false)
+            }
         }
     }
 

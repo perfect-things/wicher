@@ -6,6 +6,7 @@ import SwiftUI
 ///
 /// AppKit owns the window and split view (native sidebar material, a
 /// non-collapsible sidebar, frame autosave); SwiftUI draws the contents.
+@MainActor
 final class SettingsWindow: NSObject {
     private(set) var window: NSWindow?
     let model = SettingsModel()
