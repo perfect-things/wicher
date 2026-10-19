@@ -1,144 +1,126 @@
 {
-  "color-space-for-untagged-svg-colors": "display-p3",
-  "fill-specializations": [
+  "color-space-for-untagged-svg-colors" : "display-p3",
+  "fill-specializations" : [
     {
-      "value": {
-        "linear-gradient": [
+      "value" : {
+        "linear-gradient" : [
           "display-p3:0.98000,0.99000,1.00000,1.00000",
           "display-p3:0.88000,0.92000,0.97000,1.00000"
-        ],
-        "orientation": {
-          "start": {
-            "x": 0.5,
-            "y": 0
-          },
-          "stop": {
-            "x": 0.5,
-            "y": 1
-          }
-        }
+        ]
       }
     },
     {
-      "appearance": "dark",
-      "value": {
-        "linear-gradient": [
+      "appearance" : "dark",
+      "value" : {
+        "linear-gradient" : [
           "display-p3:0.17000,0.17000,0.18000,1.00000",
           "display-p3:0.07000,0.07000,0.08000,1.00000"
-        ],
-        "orientation": {
-          "start": {
-            "x": 0.5,
-            "y": 0
-          },
-          "stop": {
-            "x": 0.5,
-            "y": 1
-          }
-        }
+        ]
       }
     }
   ],
-  "groups": [
+  "groups" : [
     {
-      "name": "Front",
-      "layers": [
+      "layers" : [
         {
-          "name": "window-front",
-          "image-name": "window-front.svg",
-          "glass": true,
-          "fill-specializations": [
+          "blend-mode" : "normal",
+          "fill-specializations" : [
             {
-              "value": {
-                "solid": "display-p3:0.10000,0.48000,0.98000,1.00000"
+              "value" : {
+                "solid" : "display-p3:0.10000,0.48000,0.98000,0.80000"
               }
             },
             {
-              "appearance": "dark",
-              "value": {
-                "solid": "display-p3:0.16000,0.54000,1.00000,1.00000"
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "display-p3:0.16000,0.54000,1.00000,0.80000"
               }
             }
-          ]
+          ],
+          "glass" : true,
+          "image-name" : "window-front.svg",
+          "name" : "window-front",
+          "opacity" : 1
         }
       ],
-      "shadow": {
-        "kind": "layer-color",
-        "opacity": 0.5
+      "name" : "Front",
+      "shadow" : {
+        "kind" : "layer-color",
+        "opacity" : 0.5
       },
-      "translucency": {
-        "enabled": true,
-        "value": 0.2
-      },
-      "specular": true
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.2
+      }
     },
     {
-      "name": "Streaks",
-      "layers": [
+      "layers" : [
         {
-          "name": "streaks",
-          "image-name": "streaks.svg",
-          "glass": true,
-          "fill-specializations": [
+          "fill-specializations" : [
             {
-              "value": {
-                "solid": "display-p3:0.20000,0.74000,0.94000,1.00000"
+              "value" : {
+                "solid" : "display-p3:0.20000,0.74000,0.94000,0.80000"
               }
             },
             {
-              "appearance": "dark",
-              "value": {
-                "solid": "display-p3:0.36000,0.84000,1.00000,1.00000"
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "display-p3:0.36000,0.84000,1.00000,0.80000"
               }
             }
-          ]
+          ],
+          "glass" : true,
+          "image-name" : "streaks.svg",
+          "name" : "streaks"
         }
       ],
-      "shadow": {
-        "kind": "layer-color",
-        "opacity": 0.3
+      "name" : "Streaks",
+      "shadow" : {
+        "kind" : "layer-color",
+        "opacity" : 0.3
       },
-      "translucency": {
-        "enabled": true,
-        "value": 0.2
-      },
-      "specular": true
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.2
+      }
     },
     {
-      "name": "Back",
-      "layers": [
+      "layers" : [
         {
-          "name": "window-back",
-          "image-name": "window-back.svg",
-          "glass": true,
-          "fill-specializations": [
+          "fill-specializations" : [
             {
-              "value": {
-                "solid": "display-p3:0.34000,0.35000,0.38000,0.85000"
+              "value" : {
+                "solid" : "display-p3:0.34000,0.35000,0.38000,0.80000"
               }
             },
             {
-              "appearance": "dark",
-              "value": {
-                "solid": "display-p3:0.80000,0.80000,0.84000,0.60000"
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "display-p3:0.80000,0.80000,0.84000,0.51000"
               }
             }
-          ]
+          ],
+          "glass" : true,
+          "image-name" : "window-back.svg",
+          "name" : "window-back"
         }
       ],
-      "shadow": {
-        "kind": "neutral",
-        "opacity": 0.3
+      "name" : "Back",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.3
       },
-      "translucency": {
-        "enabled": true,
-        "value": 0.5
-      },
-      "specular": true
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
     }
   ],
-  "supported-platforms": {
-    "squares": [
+  "supported-platforms" : {
+    "squares" : [
       "macOS"
     ]
   }
