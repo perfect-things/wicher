@@ -65,21 +65,16 @@ enum SystemHotKeys {
             && UInt(binding.modifiers) & chordMask == combo.eventModifierFlags.rawValue & chordMask
     }
 
-    /// Enabled system hot keys that claim `combo`. Empty when the private API
-    /// is unavailable.
-    static func enabledConflicts(with combo: HotKeyCombo) -> [Int32] {
-        enabledConflicts(with: [combo]).sorted()
-    }
-
     /// Enabled system hot keys that claim any of `combos`. Reads the system
-    /// table once (≈13 ms), however many combos there are.
+    /// table once (≈13 ms), however many combos there are. Empty when the
+    /// private API is unavailable.
     static func enabledConflicts(with combos: [HotKeyCombo]) -> Set<Int32> {
         guard !combos.isEmpty else { return [] }
         return Set(enabledBindings().filter { system in combos.contains { binding(system, matches: $0) } }.map(\.id))
     }
 
     /// Every enabled system hot key. Empty when the private API is unavailable.
-    private static func enabledBindings() -> [Binding] {
+    static func enabledBindings() -> [Binding] {
         guard let functions else { return [] }
         return idRange.compactMap { id in
             var character: UInt16 = 0, keyCode: UInt16 = 0, modifiers: UInt32 = 0
@@ -170,12 +165,18 @@ final class SystemHotKeyOverride {
         for id in needed { SystemHotKeys.setEnabled(id, false) }
     }
 
-    /// The macOS shortcut `combo` takes over (or already has), described for
-    /// the user, or nil if it does not collide with one.
-    func overriddenShortcut(for combo: HotKeyCombo) -> String? {
-        let ids = SystemHotKeys.enabledConflicts(with: combo) + disabled.filter { claims($0, combo) }
-        guard let id = ids.min() else { return nil }
-        return SystemHotKeys.knownNames[id] ?? "a macOS keyboard shortcut"
+    /// The macOS shortcut each of `combos` takes over (or already has),
+    /// described for the user, or nil where it does not collide with one.
+    /// Reads the system table once.
+    func overriddenShortcuts(for combos: [HotKeyCombo]) -> [String?] {
+        let enabled = combos.isEmpty ? [] : SystemHotKeys.enabledBindings()
+        let disabled = self.disabled
+        return combos.map { combo in
+            let ids = enabled.filter { SystemHotKeys.binding($0, matches: combo) }.map(\.id)
+                + disabled.filter { claims($0, combo) }
+            guard let id = ids.min() else { return nil }
+            return SystemHotKeys.knownNames[id] ?? "a macOS keyboard shortcut"
+        }
     }
 
     func restoreAll() {

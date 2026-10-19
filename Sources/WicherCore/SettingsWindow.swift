@@ -15,6 +15,7 @@ final class SettingsWindow: NSObject {
     func show(pane: SettingsPane? = nil) {
         if window == nil { build() }
         if let pane { model.pane = pane }
+        model.refreshShortcutNotes()
         WindowActivator.activateSelf()
         window?.makeKeyAndOrderFront(nil)
     }

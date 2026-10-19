@@ -199,19 +199,15 @@ private struct ProfileRows: View {
     @ObservedObject var model: SettingsModel
     @Binding var profile: SwitcherProfile
     let isRemovable: Bool
-    /// Re-renders the note when recording starts/stops (the system shortcuts
-    /// are paused meanwhile, which changes what the note can say).
-    @State private var recording = false
 
     var body: some View {
-        let _ = recording   // read, so a change re-renders the note
         LabeledContent {
             ShortcutField(combo: profile.combo,
                           validate: { [id = profile.id] in model.problem(with: $0, for: id) },
                           onChange: { profile.combo = $0 },
-                          onRecordingChanged: { recording = $0 })
+                          onRecordingChanged: { _ in model.refreshShortcutNotes() })
         } label: {
-            SettingLabel("Shortcut", hint: model.shortcutNote(for: profile.combo))
+            SettingLabel("Shortcut", hint: model.shortcutNotes[profile.id] ?? "")
         }
         enumPicker("Show windows of", $profile.scope) { $0.title }
         enumPicker("Show windows from", $profile.spaces) { $0.title }

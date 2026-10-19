@@ -32,12 +32,18 @@ enum SettingsPane: String, CaseIterable, Identifiable {
 /// so the window never drifts from what the rest of the app sees.
 final class SettingsModel: ObservableObject {
     @Published var pane: SettingsPane = .general
+    /// `shortcutNote`s by profile id. Worked out here, not in `body`: each one
+    /// reads the system shortcut table (≈13 ms).
+    @Published private(set) var shortcutNotes: [UUID: String] = [:]
 
     private var observer: NSObjectProtocol?
 
     init() {
         observer = NotificationCenter.default.addObserver(forName: Settings.didChange, object: Settings.shared,
-                                                          queue: .main) { [weak self] _ in
+                                                          queue: .main) { [weak self] note in
+            if note.userInfo?[Settings.changeKey] as? Settings.Change == .profiles {
+                self?.refreshShortcutNotes()
+            }
             self?.objectWillChange.send()
         }
     }
@@ -101,13 +107,27 @@ final class SettingsModel: ObservableObject {
         combo.problem(amongOthers: Settings.shared.profiles.filter { $0.id != id }.map(\.combo))
     }
 
+    /// Recomputes `shortcutNotes`. Call when what they depend on changes
+    /// outside `Settings`: recording starts or stops (the system shortcuts are
+    /// paused meanwhile), Accessibility trust changes, the window opens.
+    func refreshShortcutNotes() {
+        let profiles = Settings.shared.profiles
+        let trusted = AXIsProcessTrusted()
+        let overridden = SystemHotKeyOverride.shared.overriddenShortcuts(for: profiles.map(\.combo))
+        var notes: [UUID: String] = [:]
+        for (profile, name) in zip(profiles, overridden) {
+            notes[profile.id] = Self.shortcutNote(for: profile.combo, overriding: name, trusted: trusted)
+        }
+        if notes != shortcutNotes { shortcutNotes = notes }
+    }
+
     /// What a shortcut stands in for, its reverse, and how it commits.
-    func shortcutNote(for combo: HotKeyCombo) -> String {
+    private static func shortcutNote(for combo: HotKeyCombo, overriding overridden: String?, trusted: Bool) -> String {
         var notes: [String] = []
-        if !AXIsProcessTrusted() {
+        if !trusted {
             notes.append("⚠︎ Accessibility access is off, so macOS shortcuts such as ⌘Tab cannot be replaced. Turn Wicher on in System Settings → Privacy & Security → Accessibility.")
         }
-        if let name = SystemHotKeyOverride.shared.overriddenShortcut(for: combo) {
+        if let name = overridden {
             notes.append("Replaces \(name) while Wicher is running.")
         }
         if let reverse = combo.reverse {

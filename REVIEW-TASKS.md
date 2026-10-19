@@ -30,7 +30,7 @@ Swift 5 language mode; see the `@MainActor` task.
   - Optional: read the system table once per change, not once per combo
     (`SystemHotKeys.enabledConflicts`, SystemHotKeys.swift:70).
 
-- [ ] **Stop working out `shortcutNote` inside `body`.**
+- [x] **Stop working out `shortcutNote` inside `body`.**
   `ProfileRows.body` calls `SettingsModel.shortcutNote(for:)` (SettingsModel.swift:105),
   which calls `overriddenShortcut`. That is another ≈13 ms system-table check per profile
   on every render of the Switchers pane.
@@ -73,8 +73,8 @@ Swift 5 language mode; see the `@MainActor` task.
   - `ShortcutField` (line 250): `let _ = wire()` changes the recorder's closures on every
     render. The closures only look things up by profile id, so set them once when the
     recorder is created in `init`.
-  - `ProfileRows` (line 198): `let _ = recording` exists only to force a redraw. Drop it
-    once the shortcut notes live in the model (see High).
+  - ~~`ProfileRows` (line 198): `let _ = recording` exists only to force a redraw. Drop it
+    once the shortcut notes live in the model (see High).~~ Done with the High task.
 
 - [ ] **Make `Settings` observable and move the Settings UI to Observation.**
   `SettingsModel` and `ShortcutRecorder` use `ObservableObject`. Every `Settings.didChange`
