@@ -247,22 +247,23 @@ private struct ProfileRows: View {
 /// (click, or Space with keyboard navigation). Recording is `ShortcutRecorder`.
 private struct ShortcutField: View {
     var combo: HotKeyCombo
-    var validate: (HotKeyCombo) -> String?
-    var onChange: (HotKeyCombo) -> Void
-    var onRecordingChanged: (Bool) -> Void
     @StateObject private var recorder: ShortcutRecorder
 
+    /// The closures are wired once, when the recorder is created: they only
+    /// look things up by profile id, so later renders' copies are no different.
     init(combo: HotKeyCombo, validate: @escaping (HotKeyCombo) -> String?,
          onChange: @escaping (HotKeyCombo) -> Void, onRecordingChanged: @escaping (Bool) -> Void) {
         self.combo = combo
-        self.validate = validate
-        self.onChange = onChange
-        self.onRecordingChanged = onRecordingChanged
-        _recorder = StateObject(wrappedValue: ShortcutRecorder(combo: combo))
+        _recorder = StateObject(wrappedValue: {
+            let recorder = ShortcutRecorder(combo: combo)
+            recorder.validate = validate
+            recorder.onChange = onChange
+            recorder.onRecordingChanged = onRecordingChanged
+            return recorder
+        }())
     }
 
     var body: some View {
-        let _ = wire()
         Group {
             let button = Button(action: recorder.toggleRecording) {
                 Text(recorder.title).frame(minWidth: 96)
@@ -272,12 +273,6 @@ private struct ShortcutField: View {
         .help("Click, then press the new shortcut. Esc cancels.")
         .onChange(of: combo) { _, new in if !recorder.isRecording { recorder.combo = new } }
         .onDisappear(perform: recorder.stopRecording)   // card removed or window closed
-    }
-
-    private func wire() {
-        recorder.validate = validate
-        recorder.onChange = onChange
-        recorder.onRecordingChanged = onRecordingChanged
     }
 }
 

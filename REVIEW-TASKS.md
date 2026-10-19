@@ -69,7 +69,7 @@ Swift 5 language mode; see the `@MainActor` task.
 
 ## Low
 
-- [ ] **Remove side effects from `body`** (SettingsViews.swift).
+- [x] **Remove side effects from `body`** (SettingsViews.swift).
   - `ShortcutField` (line 250): `let _ = wire()` changes the recorder's closures on every
     render. The closures only look things up by profile id, so set them once when the
     recorder is created in `init`.
