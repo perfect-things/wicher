@@ -57,7 +57,7 @@ Swift 5 language mode; see the `@MainActor` task.
     General. If it is slow, cache it and refresh it when the window opens or the setting
     changes.
 
-- [ ] **Accessibility fixes in the Settings views** (SettingsViews.swift).
+- [x] **Accessibility fixes in the Settings views** (SettingsViews.swift).
   - Add button (line 176): `.help` is a tooltip, not a VoiceOver label. Use
     `Button("Add Switcher", systemImage: "plus", action: model.addProfile)` with
     `.labelStyle(.iconOnly)`, keeping the circle styling.

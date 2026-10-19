@@ -16,6 +16,7 @@ struct SettingsSidebar: View {
                 ForEach(SettingsPane.allCases) { pane in
                     Button { model.pane = pane } label: { row(pane) }
                         .buttonStyle(.plain)
+                        .accessibilityAddTraits(pane == model.pane ? .isSelected : [])
                 }
             }
             .padding(.horizontal, 10)
@@ -188,8 +189,11 @@ private struct SwitchersPane: View {
                 .font(.callout.weight(.regular))
                 .foregroundStyle(.secondary)
             Spacer()
+            // A Label, not a bare Image, so VoiceOver reads "Add Switcher";
+            // the circle is inside the label so all of it is clickable.
             Button(action: model.addProfile) {
-                Image(systemName: "plus")
+                Label("Add Switcher", systemImage: "plus")
+                    .labelStyle(.iconOnly)
                     .font(.system(size: 15, weight: .semibold))
                     .frame(width: 30, height: 30)
                     .background(Circle().fill(Color.primary.opacity(0.1)))
@@ -223,7 +227,7 @@ private struct ProfileRows: View {
         if isRemovable {
             HStack {
                 Spacer()
-                Button { model.removeProfile(profile.id) } label: {
+                Button(role: .destructive) { model.removeProfile(profile.id) } label: {
                     Text("Remove Switcher").foregroundStyle(.red)
                 }
             }
@@ -288,6 +292,7 @@ private struct AboutPane: View {
             Image(nsImage: NSApp.applicationIconImage)
                 .resizable()
                 .frame(width: 128, height: 128)
+                .accessibilityHidden(true)   // the name is printed right below
             Text("Wicher")
                 .font(.system(size: 26, weight: .semibold))
             Text(model.version)
