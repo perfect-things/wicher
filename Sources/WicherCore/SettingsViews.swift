@@ -8,7 +8,7 @@ import SwiftUI
 /// in the accent color, which swallows the (accent-colored) icons. This draws
 /// a neutral highlight instead, like most apps' settings sidebars.
 struct SettingsSidebar: View {
-    @ObservedObject var model: SettingsModel
+    let model: SettingsModel
 
     var body: some View {
         ScrollView {
@@ -43,13 +43,13 @@ struct SettingsSidebar: View {
 }
 
 struct SettingsDetail: View {
-    @ObservedObject var model: SettingsModel
+    let model: SettingsModel
 
     var body: some View {
         Group {
             switch model.pane {
             case .general: GeneralPane(model: model)
-            case .appearance: AppearancePane(model: model)
+            case .appearance: AppearancePane()
             case .switchers: SwitchersPane(model: model)
             case .about: AboutPane(model: model)
             }
@@ -61,7 +61,8 @@ struct SettingsDetail: View {
 // MARK: - General
 
 private struct GeneralPane: View {
-    @ObservedObject var model: SettingsModel
+    let model: SettingsModel
+    @Bindable private var settings = Settings.shared
     @State private var copied = false
     @State private var collecting = false
 
@@ -77,15 +78,15 @@ private struct GeneralPane: View {
                 }
                 SettingToggle("Show menu bar icon",
                               hint: "When it is hidden, open Wicher again (from Finder or Spotlight) to get back to Settings.",
-                              isOn: model.binding(\.showMenuBarIcon))
+                              isOn: $settings.showMenuBarIcon)
             }
 
             Section("Switcher panel") {
-                SettingToggle("Change selection on mouse hover", isOn: model.binding(\.selectOnHover))
-                SettingToggle("Change selection on scroll", isOn: model.binding(\.selectOnScroll))
+                SettingToggle("Change selection on mouse hover", isOn: $settings.selectOnHover)
+                SettingToggle("Change selection on scroll", isOn: $settings.selectOnScroll)
                 ValueSlider(title: "Show panel after",
                             subtitle: "A quick tap-and-release within the delay switches to the previous window without showing the panel — like ⌘Tab.",
-                            value: model.binding(\.showDelayMs), range: 0...400, unit: "ms")
+                            value: $settings.showDelayMs, range: 0...400, unit: "ms")
             }
 
             // Window detection on macOS is mostly undocumented behavior, and
@@ -122,17 +123,17 @@ private struct GeneralPane: View {
 // MARK: - Appearance
 
 private struct AppearancePane: View {
-    @ObservedObject var model: SettingsModel
+    @Bindable private var settings = Settings.shared
 
     var body: some View {
         Form {
             Section {
-                Picker(selection: model.binding(\.appearanceMode)) {
+                Picker(selection: $settings.appearanceMode) {
                     ForEach(AppearanceMode.allCases, id: \.self) { Text($0.title).tag($0) }
                 } label: {
                     SettingLabel("Theme", hint: "“System” follows macOS Appearance.")
                 }
-                Picker(selection: model.binding(\.highlightStyle)) {
+                Picker(selection: $settings.highlightStyle) {
                     ForEach(HighlightStyle.allCases, id: \.self) { Text($0.title).tag($0) }
                 } label: {
                     SettingLabel("Selection highlight", hint: "How the selected window is marked in the switcher.")
@@ -140,19 +141,19 @@ private struct AppearancePane: View {
             }
 
             Section {
-                ValueSlider(title: "Icon size", value: model.binding(\.iconSize),
+                ValueSlider(title: "Icon size", value: $settings.iconSize,
                             range: HUDMetrics.iconRange, unit: "pt")
-                ValueSlider(title: "Text size", value: model.binding(\.textSize),
+                ValueSlider(title: "Text size", value: $settings.textSize,
                             range: HUDMetrics.textRange, unit: "pt")
-                ValueSlider(title: "Row padding", value: model.binding(\.rowPadding),
+                ValueSlider(title: "Row padding", value: $settings.rowPadding,
                             range: HUDMetrics.paddingRange, unit: "pt")
                 ValueSlider(title: "Panel width",
                             subtitle: "Relative to the width that suits the icon size.",
-                            value: model.binding(\.panelWidthScale),
+                            value: $settings.panelWidthScale,
                             range: HUDMetrics.widthScaleRange, step: 5, unit: "%")
                 SettingToggle("Show app names",
                               hint: "Off, each row is just the app icon and the window title.",
-                              isOn: model.binding(\.showAppNames))
+                              isOn: $settings.showAppNames)
             } header: {
                 Text("Switcher panel")
             } footer: {
@@ -167,14 +168,16 @@ private struct AppearancePane: View {
 // MARK: - Switchers
 
 private struct SwitchersPane: View {
-    @ObservedObject var model: SettingsModel
+    let model: SettingsModel
+    @Bindable private var settings = Settings.shared
 
     var body: some View {
         Form {
-            ForEach(Array(model.profiles.enumerated()), id: \.element.id) { index, profile in
+            ForEach(settings.profiles.enumerated(), id: \.element.id) { index, profile in
                 Section {
-                    ProfileRows(model: model, profile: model.profile(profile),
-                                isRemovable: model.profiles.count > 1)
+                    // By id, not by index: the binding must survive Remove Switcher.
+                    ProfileRows(model: model, profile: $settings[profileID: profile.id],
+                                isRemovable: settings.profiles.count > 1)
                 } header: {
                     if index == 0 { header }
                 }
@@ -206,7 +209,7 @@ private struct SwitchersPane: View {
 }
 
 private struct ProfileRows: View {
-    @ObservedObject var model: SettingsModel
+    let model: SettingsModel
     @Binding var profile: SwitcherProfile
     let isRemovable: Bool
 
@@ -214,7 +217,7 @@ private struct ProfileRows: View {
         LabeledContent {
             ShortcutField(combo: profile.combo,
                           validate: { [id = profile.id] in model.problem(with: $0, for: id) },
-                          onChange: { profile.combo = $0 },
+                          onChange: { [id = profile.id] in Settings.shared[profileID: id].combo = $0 },
                           onRecordingChanged: { _ in model.refreshShortcutNotes() })
         } label: {
             SettingLabel("Shortcut", hint: model.shortcutNotes[profile.id] ?? "")
@@ -247,14 +250,14 @@ private struct ProfileRows: View {
 /// (click, or Space with keyboard navigation). Recording is `ShortcutRecorder`.
 private struct ShortcutField: View {
     var combo: HotKeyCombo
-    @StateObject private var recorder: ShortcutRecorder
+    @State private var recorder: ShortcutRecorder
 
     /// The closures are wired once, when the recorder is created: they only
     /// look things up by profile id, so later renders' copies are no different.
     init(combo: HotKeyCombo, validate: @escaping (HotKeyCombo) -> String?,
          onChange: @escaping (HotKeyCombo) -> Void, onRecordingChanged: @escaping (Bool) -> Void) {
         self.combo = combo
-        _recorder = StateObject(wrappedValue: {
+        _recorder = State(initialValue: {
             let recorder = ShortcutRecorder(combo: combo)
             recorder.validate = validate
             recorder.onChange = onChange
@@ -279,7 +282,7 @@ private struct ShortcutField: View {
 // MARK: - About
 
 private struct AboutPane: View {
-    @ObservedObject var model: SettingsModel
+    let model: SettingsModel
 
     var body: some View {
         VStack(spacing: 10) {
@@ -318,8 +321,7 @@ private struct ValueSlider: View {
         LabeledContent {
             HStack(spacing: 10) {
                 // Snapped here, not with `Slider(step:)`, which draws tick marks.
-                Slider(value: Binding(get: { Double(value) },
-                                      set: { value = Int(($0 / Double(step)).rounded()) * step }),
+                Slider(value: $value[sliderStep: step],
                        in: Double(range.lowerBound)...Double(range.upperBound))
                     .labelsHidden()
                     .frame(minWidth: 120, maxWidth: 220)
@@ -330,6 +332,19 @@ private struct ValueSlider: View {
             }
         } label: {
             SettingLabel(title, hint: subtitle)
+        }
+    }
+}
+
+private extension Int {
+    /// The value as a slider position; set, it snaps to a multiple of `step`
+    /// and writes only when that differs, so a drag doesn't write (and post)
+    /// once per pixel.
+    subscript(sliderStep step: Int) -> Double {
+        get { Double(self) }
+        set {
+            let snapped = Int((newValue / Double(step)).rounded()) * step
+            if snapped != self { self = snapped }
         }
     }
 }

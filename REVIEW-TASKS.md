@@ -76,7 +76,7 @@ Swift 5 language mode; see the `@MainActor` task.
   - ~~`ProfileRows` (line 198): `let _ = recording` exists only to force a redraw. Drop it
     once the shortcut notes live in the model (see High).~~ Done with the High task.
 
-- [ ] **Make `Settings` observable and move the Settings UI to Observation.**
+- [x] **Make `Settings` observable and move the Settings UI to Observation.**
   `SettingsModel` and `ShortcutRecorder` use `ObservableObject`. Every `Settings.didChange`
   sends `objectWillChange`, which redraws every view holding the model, including
   `AboutPane` and `SettingsSidebar` on each slider tick. Bindings are hand-made closures
@@ -138,6 +138,10 @@ Swift 5 language mode; see the `@MainActor` task.
   `@MainActor`.
   - Mark `AppController`, `SwitcherController`, `SettingsWindow`, `SettingsModel`,
     `ShortcutRecorder`, `AppearanceManager`, `WindowActivator` and `DeminiaturizeWaiter`.
+    `SettingsModel` and `ShortcutRecorder` are already `@Observable` but were left without
+    `@MainActor` (it cascades into `AppController`, `WicherApp.run` and `main.swift`). Give
+    them `isolated deinit`, and wrap the `queue: .main` notification closures in
+    `MainActor.assumeIsolated`.
   - Handle `WindowEnumerator` separately and deliberately, since it runs on both the main
     thread and `scanQueue`.
   - Then remove `swiftLanguageModes: [.v5]` to move to Swift 6 language mode.
@@ -149,7 +153,7 @@ Swift 5 language mode; see the `@MainActor` task.
   13.0`), the copy in `build.sh`, `CFBundleIconFile` in Info.plist if present, and the
   mention in CLAUDE.md. Check the Finder and Dock icons afterwards.
 
-- [ ] **Skip same-value slider writes.**
+- [x] **Skip same-value slider writes.**
   `ValueSlider` (SettingsViews.swift:310) writes UserDefaults, posts `didChange` and redraws
   the pane on every drag tick, even when the snapped value hasn't changed. Add
   `guard snapped != value` in the setter.

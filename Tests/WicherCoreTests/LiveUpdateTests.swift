@@ -102,5 +102,59 @@ final class SettingsTests: XCTestCase {
         let settings = Settings(defaults: defaults)
         settings.profiles = []
         XCTAssertEqual(settings.profiles.count, SwitcherProfile.defaults().count)
+        XCTAssertEqual(Settings(defaults: defaults).profiles.map(\.id), settings.profiles.map(\.id),
+                       "restored defaults are persisted")
+    }
+
+    func testGeneratedDefaultProfilesKeepTheirIDs() {
+        let first = Settings(defaults: defaults).profiles.map(\.id)
+        XCTAssertEqual(Settings(defaults: defaults).profiles.map(\.id), first)
+    }
+
+    func testSetClampsPersistsAndPosts() {
+        let settings = Settings(defaults: defaults)
+        let changes = recordChanges(of: settings)
+        settings.textSize = 1
+        XCTAssertEqual(settings.textSize, HUDMetrics.textRange.lowerBound)
+        XCTAssertEqual(Settings(defaults: defaults).textSize, HUDMetrics.textRange.lowerBound)
+        settings.showMenuBarIcon = false
+        XCTAssertFalse(Settings(defaults: defaults).showMenuBarIcon)
+        XCTAssertEqual(changes.values, [.metrics, .menuBarIcon])
+    }
+
+    func testSameValueDoesNotPost() {
+        let settings = Settings(defaults: defaults)
+        let changes = recordChanges(of: settings)
+        settings.iconSize = settings.iconSize
+        settings.selectOnHover = settings.selectOnHover
+        settings.profiles = settings.profiles
+        settings[profileID: settings.profiles[0].id] = settings.profiles[0]
+        XCTAssertEqual(changes.values, [])
+    }
+
+    func testProfileSubscriptSurvivesRemoval() {
+        let settings = Settings(defaults: defaults)
+        var renamed = settings.profiles[0]
+        renamed.name = "Renamed"
+        settings[profileID: renamed.id] = renamed
+        XCTAssertEqual(settings.profiles[0].name, "Renamed")
+
+        let removed = settings.profiles[1].id
+        settings.profiles.remove(at: 1)
+        _ = settings[profileID: removed]                    // reads without trapping
+        settings[profileID: removed] = profile()            // and ignores the write
+        XCTAssertEqual(settings.profiles.map(\.id), [renamed.id])
+    }
+
+    private final class Changes { var values: [Settings.Change] = [] }
+
+    private func recordChanges(of settings: Settings) -> Changes {
+        let changes = Changes()
+        let token = NotificationCenter.default.addObserver(forName: Settings.didChange, object: settings,
+                                                           queue: nil) { note in
+            if let change = note.userInfo?[Settings.changeKey] as? Settings.Change { changes.values.append(change) }
+        }
+        addTeardownBlock { NotificationCenter.default.removeObserver(token) }
+        return changes
     }
 }

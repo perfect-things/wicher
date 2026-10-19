@@ -1,5 +1,4 @@
 import AppKit
-import Combine
 import SwiftUI
 
 /// The Settings window: a sidebar of panes beside a grouped form, in an
@@ -10,7 +9,6 @@ import SwiftUI
 final class SettingsWindow: NSObject {
     private(set) var window: NSWindow?
     let model = SettingsModel()
-    private var paneObserver: AnyCancellable?
 
     func show(pane: SettingsPane? = nil) {
         if window == nil { build() }
@@ -60,7 +58,8 @@ final class SettingsWindow: NSObject {
         // skips controls or can't get back to the sidebar on the others.
         win.autorecalculatesKeyViewLoop = true
 
-        paneObserver = model.$pane.sink { [weak win] pane in win?.title = pane.title }
+        win.title = model.pane.title
+        model.onPaneChange = { [weak win] pane in win?.title = pane.title }
         window = win
     }
 }

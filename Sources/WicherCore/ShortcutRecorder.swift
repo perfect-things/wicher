@@ -17,26 +17,27 @@ import Carbon.HIToolbox
 ///
 /// A model, not an `NSButton`: the button itself is SwiftUI, so it takes part
 /// in the Form's keyboard focus like the controls around it.
-final class ShortcutRecorder: ObservableObject {
+@Observable
+final class ShortcutRecorder {
     var combo: HotKeyCombo {
         didSet { if !isRecording { title = combo.displayString } }
     }
     /// Returns why a chord cannot be used, or nil to accept it.
-    var validate: (HotKeyCombo) -> String? = { _ in nil }
+    @ObservationIgnored var validate: (HotKeyCombo) -> String? = { _ in nil }
     /// Called with an accepted chord.
-    var onChange: (HotKeyCombo) -> Void = { _ in }
+    @ObservationIgnored var onChange: (HotKeyCombo) -> Void = { _ in }
     /// Called when recording starts (true) and ends (false).
-    var onRecordingChanged: (Bool) -> Void = { _ in }
+    @ObservationIgnored var onRecordingChanged: (Bool) -> Void = { _ in }
 
-    @Published private(set) var title: String
-    @Published private(set) var isRecording = false
-    private var monitor: Any?
-    private var symbolicModeToken: UnsafeMutableRawPointer?
-    private var resignObserver: NSObjectProtocol?
-    private var messageWork: DispatchWorkItem?
+    private(set) var title: String
+    private(set) var isRecording = false
+    @ObservationIgnored private var monitor: Any?
+    @ObservationIgnored private var symbolicModeToken: UnsafeMutableRawPointer?
+    @ObservationIgnored private var resignObserver: NSObjectProtocol?
+    @ObservationIgnored private var messageWork: DispatchWorkItem?
     /// The click that cancelled recording. If it was on the button, its
     /// mouse-up then toggles, and must not start recording again.
-    private var cancellingClick: Int?
+    @ObservationIgnored private var cancellingClick: Int?
 
     private static let prompt = "Type shortcut…"
 

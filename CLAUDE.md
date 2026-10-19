@@ -121,16 +121,20 @@ database. Flow of one switch:
    timeout). App-only entries get a Dock-click-equivalent reopen.
 
 Settings window: `SettingsWindow` (AppKit window + `NSSplitViewController`, sidebar
-of General / Appearance / Switchers / About) hosting SwiftUI panes (`SettingsViews`: grouped `Form`s) over `SettingsModel`,
-which binds straight to `Settings.shared` and re-renders on `Settings.didChange` — no
-copies to drift. The shortcut button is a SwiftUI `Button` over the `ShortcutRecorder` model.
+of General / Appearance / Switchers / About) hosting SwiftUI panes (`SettingsViews`: grouped `Form`s).
+`Settings` is `@Observable`: panes bind straight to it (`@Bindable … = Settings.shared`;
+profile rows by id via `settings[profileID:]`, which survives Remove Switcher) — no copies
+to drift. `SettingsModel` (`@Observable`) holds only what isn't a setting: the pane, the
+cached login-item status and the shortcut notes. The shortcut button is a SwiftUI `Button`
+over the `ShortcutRecorder` model.
 The window sets `autorecalculatesKeyViewLoop`: the sidebar and the pane are separate hosting
 views, and without it AppKit's key-view loop is computed for the first pane only — on the
 others Tab/Shift-Tab skipped controls or never got back to the sidebar.
 
-Config: `Settings` (UserDefaults; globals) + `SwitcherProfile` (Codable, JSON-encoded
-into UserDefaults, decoded once and cached; per-switcher scope/Spaces/placement +
-shortcut). Every setter posts `Settings.didChange` with a `Settings.Change`;
+Config: `Settings` (UserDefaults, loaded once in `init`; globals) + `SwitcherProfile`
+(Codable, JSON-encoded into UserDefaults; per-switcher scope/Spaces/placement +
+shortcut). Every `didSet` clamps, persists and posts `Settings.didChange` with a
+`Settings.Change` — only when the value really changed;
 `AppController` re-registers hot keys (and re-applies the system override) on
 `.profiles` and applies `.appearance`. `HotKeyCombo.reverse` is nil for a combo with
 Shift. In the panel, `handleKeyDown` subtracts the trigger's modifiers, so ⌘-held typing

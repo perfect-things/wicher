@@ -4,9 +4,13 @@ import AppKit
 /// Per-switcher filter options live on each `SwitcherProfile`; this holds the
 /// global, cross-switcher preferences.
 ///
-/// Every setter posts `Settings.didChange` (on the main thread, with the
-/// changed `Settings.Change` under `changeKey`), so consumers react to edits
-/// instead of each one having to be told. Profiles are decoded once and kept.
+/// `@Observable`, so SwiftUI binds straight to it and redraws only what reads
+/// a changed property. Every value is loaded from `defaults` once, in `init`,
+/// and each `didSet` clamps, persists and posts `Settings.didChange` (on the
+/// main thread, with the changed `Settings.Change` under `changeKey`) — but
+/// only when the value really changed. A `defaults write` while wicher runs
+/// is therefore not picked up.
+@Observable
 final class Settings {
     static let shared = Settings()
 
@@ -17,8 +21,7 @@ final class Settings {
         case appearance, metrics, selection, showDelay, profiles, menuBarIcon
     }
 
-    private let defaults: UserDefaults
-    private var cachedProfiles: [SwitcherProfile]?
+    @ObservationIgnored private let defaults: UserDefaults
 
     private enum Key {
         static let appearance = "appearanceMode"
@@ -50,89 +53,134 @@ final class Settings {
             Key.showAppNames: true,
             Key.panelWidthScale: 100,
         ])
+        appearanceMode = AppearanceMode(rawValue: defaults.integer(forKey: Key.appearance)) ?? .system
+        highlightStyle = HighlightStyle(rawValue: defaults.integer(forKey: Key.highlightStyle)) ?? .glass
+        iconSize = defaults.integer(forKey: Key.iconSize).clamped(to: HUDMetrics.iconRange)
+        textSize = defaults.integer(forKey: Key.textSize).clamped(to: HUDMetrics.textRange)
+        panelWidthScale = defaults.integer(forKey: Key.panelWidthScale).clamped(to: HUDMetrics.widthScaleRange)
+        showAppNames = defaults.bool(forKey: Key.showAppNames)
+        rowPadding = defaults.integer(forKey: Key.rowPadding).clamped(to: HUDMetrics.paddingRange)
+        selectOnHover = defaults.bool(forKey: Key.hoverSelects)
+        selectOnScroll = defaults.bool(forKey: Key.scrollSelects)
+        showDelayMs = max(0, defaults.integer(forKey: Key.showDelayMs))
+        showMenuBarIcon = defaults.bool(forKey: Key.showMenuBarIcon)
+
+        let decoded = defaults.data(forKey: Key.profiles)
+            .flatMap { try? JSONDecoder().decode([SwitcherProfile].self, from: $0) }
+        if let decoded, !decoded.isEmpty {
+            profiles = decoded
+        } else {
+            // Persisted (`didSet` doesn't run in `init`), so the generated
+            // defaults keep their UUIDs across launches.
+            profiles = SwitcherProfile.defaults()
+            persist(profiles: profiles)
+        }
     }
 
     var appearanceMode: AppearanceMode {
-        get { AppearanceMode(rawValue: defaults.integer(forKey: Key.appearance)) ?? .system }
-        set { defaults.set(newValue.rawValue, forKey: Key.appearance); post(.appearance) }
+        didSet { store(appearanceMode.rawValue, oldValue.rawValue, Key.appearance, .appearance) }
     }
 
     /// How the switcher draws the selected row. Read by each row when its
     /// selection changes, so a change shows the next time the panel opens.
     var highlightStyle: HighlightStyle {
-        get { HighlightStyle(rawValue: defaults.integer(forKey: Key.highlightStyle)) ?? .glass }
-        set { defaults.set(newValue.rawValue, forKey: Key.highlightStyle); post(.appearance) }
+        didSet { store(highlightStyle.rawValue, oldValue.rawValue, Key.highlightStyle, .appearance) }
     }
 
     /// Icon size in points; panel width scales from it.
     var iconSize: Int {
-        get { defaults.integer(forKey: Key.iconSize).clamped(to: HUDMetrics.iconRange) }
-        set { defaults.set(newValue.clamped(to: HUDMetrics.iconRange), forKey: Key.iconSize); post(.metrics) }
+        didSet {
+            let clamped = iconSize.clamped(to: HUDMetrics.iconRange)
+            if clamped != iconSize { iconSize = clamped; return }
+            store(iconSize, oldValue, Key.iconSize, .metrics)
+        }
     }
 
     /// Window-title text size in points.
     var textSize: Int {
-        get { defaults.integer(forKey: Key.textSize).clamped(to: HUDMetrics.textRange) }
-        set { defaults.set(newValue.clamped(to: HUDMetrics.textRange), forKey: Key.textSize); post(.metrics) }
+        didSet {
+            let clamped = textSize.clamped(to: HUDMetrics.textRange)
+            if clamped != textSize { textSize = clamped; return }
+            store(textSize, oldValue, Key.textSize, .metrics)
+        }
     }
 
     /// Percent of the icon-derived panel width (see `HUDMetrics.make`).
     var panelWidthScale: Int {
-        get { defaults.integer(forKey: Key.panelWidthScale).clamped(to: HUDMetrics.widthScaleRange) }
-        set { defaults.set(newValue.clamped(to: HUDMetrics.widthScaleRange), forKey: Key.panelWidthScale); post(.metrics) }
+        didSet {
+            let clamped = panelWidthScale.clamped(to: HUDMetrics.widthScaleRange)
+            if clamped != panelWidthScale { panelWidthScale = clamped; return }
+            store(panelWidthScale, oldValue, Key.panelWidthScale, .metrics)
+        }
     }
 
     /// The app-name column left of each row's icon. Off, rows are just
     /// icon + title. Part of `HUDMetrics`, so it applies on the next open.
     var showAppNames: Bool {
-        get { defaults.bool(forKey: Key.showAppNames) }
-        set { defaults.set(newValue, forKey: Key.showAppNames); post(.metrics) }
+        didSet { store(showAppNames, oldValue, Key.showAppNames, .metrics) }
     }
 
     /// Vertical padding above/below each row's content, in points.
     var rowPadding: Int {
-        get { defaults.integer(forKey: Key.rowPadding).clamped(to: HUDMetrics.paddingRange) }
-        set { defaults.set(newValue.clamped(to: HUDMetrics.paddingRange), forKey: Key.rowPadding); post(.metrics) }
+        didSet {
+            let clamped = rowPadding.clamped(to: HUDMetrics.paddingRange)
+            if clamped != rowPadding { rowPadding = clamped; return }
+            store(rowPadding, oldValue, Key.rowPadding, .metrics)
+        }
     }
 
     var selectOnHover: Bool {
-        get { defaults.bool(forKey: Key.hoverSelects) }
-        set { defaults.set(newValue, forKey: Key.hoverSelects); post(.selection) }
+        didSet { store(selectOnHover, oldValue, Key.hoverSelects, .selection) }
     }
 
     var selectOnScroll: Bool {
-        get { defaults.bool(forKey: Key.scrollSelects) }
-        set { defaults.set(newValue, forKey: Key.scrollSelects); post(.selection) }
+        didSet { store(selectOnScroll, oldValue, Key.scrollSelects, .selection) }
     }
 
     /// Delay before the panel is drawn. A quick tap+release within this window
     /// switches to the previous window without the panel ever appearing.
     var showDelayMs: Int {
-        get { defaults.integer(forKey: Key.showDelayMs) }
-        set { defaults.set(max(0, newValue), forKey: Key.showDelayMs); post(.showDelay) }
+        didSet {
+            if showDelayMs < 0 { showDelayMs = 0; return }
+            store(showDelayMs, oldValue, Key.showDelayMs, .showDelay)
+        }
     }
 
     /// Hidden, wicher keeps running; opening the app again shows Settings.
     var showMenuBarIcon: Bool {
-        get { defaults.bool(forKey: Key.showMenuBarIcon) }
-        set { defaults.set(newValue, forKey: Key.showMenuBarIcon); post(.menuBarIcon) }
+        didSet { store(showMenuBarIcon, oldValue, Key.showMenuBarIcon, .menuBarIcon) }
     }
 
+    /// Never empty: setting `[]` puts the default switchers back.
     var profiles: [SwitcherProfile] {
-        get {
-            if let cachedProfiles { return cachedProfiles }
-            let decoded = defaults.data(forKey: Key.profiles)
-                .flatMap { try? JSONDecoder().decode([SwitcherProfile].self, from: $0) }
-            let profiles = (decoded?.isEmpty == false) ? decoded! : SwitcherProfile.defaults()
-            cachedProfiles = profiles
-            return profiles
-        }
-        set {
-            if let data = try? JSONEncoder().encode(newValue) {
-                defaults.set(data, forKey: Key.profiles)
-            }
-            cachedProfiles = newValue.isEmpty ? nil : newValue
+        didSet {
+            if profiles.isEmpty { profiles = SwitcherProfile.defaults(); return }
+            guard profiles != oldValue else { return }
+            persist(profiles: profiles)
             post(.profiles)
+        }
+    }
+
+    /// One profile by id, for a binding that survives the profile's removal:
+    /// a removed id reads as a default profile and ignores writes. Equal
+    /// writes are skipped by `profiles`' `didSet`.
+    subscript(profileID id: UUID) -> SwitcherProfile {
+        get { profiles.first { $0.id == id } ?? SwitcherProfile.defaults()[0] }
+        set {
+            guard let i = profiles.firstIndex(where: { $0.id == id }), profiles[i] != newValue else { return }
+            profiles[i] = newValue
+        }
+    }
+
+    private func store<T: Equatable>(_ value: T, _ oldValue: T, _ key: String, _ change: Change) {
+        guard value != oldValue else { return }
+        defaults.set(value, forKey: key)
+        post(change)
+    }
+
+    private func persist(profiles: [SwitcherProfile]) {
+        if let data = try? JSONEncoder().encode(profiles) {
+            defaults.set(data, forKey: Key.profiles)
         }
     }
 

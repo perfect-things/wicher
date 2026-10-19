@@ -27,30 +27,32 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     }
 }
 
-/// Bridges `Settings` to the SwiftUI panes. Holds no copies: bindings read and
-/// write `Settings.shared` directly, and every `Settings.didChange` re-renders,
-/// so the window never drifts from what the rest of the app sees.
-final class SettingsModel: ObservableObject {
-    @Published var pane: SettingsPane = .general
+/// What the Settings window needs beyond `Settings` itself, which the panes
+/// bind to directly: the selected pane, login-item state, shortcut notes.
+@Observable
+final class SettingsModel {
+    var pane: SettingsPane = .general {
+        didSet { onPaneChange?(pane) }
+    }
+    /// Called synchronously on every pane change; `SettingsWindow` retitles itself.
+    @ObservationIgnored var onPaneChange: ((SettingsPane) -> Void)?
     /// `shortcutNote`s by profile id. Worked out here, not in `body`: each one
     /// reads the system shortcut table (≈13 ms).
-    @Published private(set) var shortcutNotes: [UUID: String] = [:]
+    private(set) var shortcutNotes: [UUID: String] = [:]
     /// `SMAppService.mainApp.status`, cached: it is an XPC round trip (≈1.4 ms,
     /// 8 ms cold), and the toggle reads it on every render. See `refreshLoginItem()`.
-    @Published private(set) var loginItemStatus: SMAppService.Status = .notRegistered
+    private(set) var loginItemStatus: SMAppService.Status = .notRegistered
     /// Why the last (un)registration failed, until the next attempt.
-    @Published private(set) var loginItemError: String?
+    private(set) var loginItemError: String?
 
-    private var observers: [NSObjectProtocol] = []
+    @ObservationIgnored private var observers: [NSObjectProtocol] = []
 
     init() {
         let center = NotificationCenter.default
         observers.append(center.addObserver(forName: Settings.didChange, object: Settings.shared,
                                             queue: .main) { [weak self] note in
-            if note.userInfo?[Settings.changeKey] as? Settings.Change == .profiles {
-                self?.refreshShortcutNotes()
-            }
-            self?.objectWillChange.send()
+            guard note.userInfo?[Settings.changeKey] as? Settings.Change == .profiles else { return }
+            self?.refreshShortcutNotes()
         })
         // Approval happens in System Settings; pick it up when the user comes back.
         observers.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil,
@@ -60,11 +62,6 @@ final class SettingsModel: ObservableObject {
     }
 
     deinit { observers.forEach(NotificationCenter.default.removeObserver) }
-
-    func binding<T>(_ keyPath: ReferenceWritableKeyPath<Settings, T>) -> Binding<T> {
-        Binding(get: { Settings.shared[keyPath: keyPath] },
-                set: { Settings.shared[keyPath: keyPath] = $0 })
-    }
 
     /// Login-item state lives in ServiceManagement, not UserDefaults. Waiting
     /// for approval counts as on — `register()` succeeded — and `loginItemHint`
@@ -101,20 +98,6 @@ final class SettingsModel: ObservableObject {
     }
 
     // MARK: - Switchers
-
-    var profiles: [SwitcherProfile] { Settings.shared.profiles }
-
-    /// `fallback` is what the row was built from; it is served if the profile
-    /// is removed while SwiftUI still holds the binding.
-    func profile(_ fallback: SwitcherProfile) -> Binding<SwitcherProfile> {
-        Binding(get: { Settings.shared.profiles.first { $0.id == fallback.id } ?? fallback },
-                set: { new in
-                    var all = Settings.shared.profiles
-                    guard let i = all.firstIndex(where: { $0.id == new.id }), all[i] != new else { return }
-                    all[i] = new
-                    Settings.shared.profiles = all   // AppController re-registers hot keys
-                })
-    }
 
     func addProfile() {
         let all = Settings.shared.profiles
