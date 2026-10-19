@@ -30,8 +30,7 @@ to /Applications, `snapshot`,
 
 App icon: `Resources/Wicher.icon` (Icon Composer; light/dark/tinted/clear). Run
 `scripts/make-icon.sh` after editing it — it needs full Xcode and regenerates the
-committed `Resources/Assets.car` (macOS 26+), `Resources/Wicher.icns` (older macOS) and
-`Resources/preview/`; `build.sh` only copies them, so CLT-only builds still work.
+committed `Resources/Assets.car` (read via `CFBundleIconName`) and `Resources/preview/`; `build.sh` only copies them, so CLT-only builds still work.
 
 `build.sh` also rewrites the binary's `LC_BUILD_VERSION` SDK field with `vtool`:
 SwiftPM stamps it with the deployment target (26.0), and AppKit then treats wicher as

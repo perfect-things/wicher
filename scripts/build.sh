@@ -32,7 +32,7 @@ SDK_VERSION="$(xcrun --show-sdk-version)"
 MIN_OS="$(otool -l "$APP/Contents/MacOS/Wicher" | awk '/LC_BUILD_VERSION/{f=1} f&&/minos/{print $2; exit}')"
 vtool -set-build-version macos "$MIN_OS" "$SDK_VERSION" -replace -output "$APP/Contents/MacOS/Wicher" "$APP/Contents/MacOS/Wicher"
 # Icon: prebuilt by scripts/make-icon.sh from Resources/Wicher.icon (needs Xcode).
-cp Resources/Assets.car Resources/Wicher.icns "$APP/Contents/Resources/"
+cp Resources/Assets.car "$APP/Contents/Resources/"
 
 # Sign with a stable identity when one exists, so the Accessibility grant
 # survives rebuilds (see scripts/make-signing-identity.sh). Otherwise fall back

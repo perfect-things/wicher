@@ -146,7 +146,7 @@ language mode since the `@MainActor` task.
     thread and `scanQueue`.
   - Then remove `swiftLanguageModes: [.v5]` to move to Swift 6 language mode.
 
-- [ ] **Drop the `.icns` app icon.**
+- [x] **Drop the `.icns` app icon.**
   macOS 26 reads the icon from `Resources/Assets.car` (via `CFBundleIconName`), so the
   `.icns` built for older systems is no longer used. Remove `Resources/Wicher.icns`, its
   generation in `scripts/make-icon.sh` (which still passes `--minimum-deployment-target
