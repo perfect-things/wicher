@@ -67,7 +67,13 @@ private struct GeneralPane: View {
     var body: some View {
         Form {
             Section {
-                SettingToggle("Launch at login", isOn: model.launchAtLogin)
+                SettingToggle("Launch at login", hint: model.loginItemHint, isOn: model.launchAtLogin)
+                if model.loginItemNeedsApproval {
+                    HStack {
+                        Spacer()
+                        Button("Open Login Items…", action: model.openLoginItems)
+                    }
+                }
                 SettingToggle("Show menu bar icon",
                               hint: "When it is hidden, open Wicher again (from Finder or Spotlight) to get back to Settings.",
                               isOn: model.binding(\.showMenuBarIcon))

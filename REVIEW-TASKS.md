@@ -47,7 +47,7 @@ Swift 5 language mode; see the `@MainActor` task.
   - Before storing, check
     `NSRunningApplication(processIdentifier: pid)?.isTerminated == false`.
 
-- [ ] **Explain login-item failures instead of beeping.**
+- [x] **Explain login-item failures instead of beeping.**
   In `SettingsModel.launchAtLogin` (SettingsModel.swift:54), `register()` can succeed while
   the status becomes `.requiresApproval`. The getter then reads `false` and the switch
   flips back off with no explanation. A real error only gets a beep.

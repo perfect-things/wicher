@@ -35,38 +35,69 @@ final class SettingsModel: ObservableObject {
     /// `shortcutNote`s by profile id. Worked out here, not in `body`: each one
     /// reads the system shortcut table (≈13 ms).
     @Published private(set) var shortcutNotes: [UUID: String] = [:]
+    /// `SMAppService.mainApp.status`, cached: it is an XPC round trip (≈1.4 ms,
+    /// 8 ms cold), and the toggle reads it on every render. See `refreshLoginItem()`.
+    @Published private(set) var loginItemStatus: SMAppService.Status = .notRegistered
+    /// Why the last (un)registration failed, until the next attempt.
+    @Published private(set) var loginItemError: String?
 
-    private var observer: NSObjectProtocol?
+    private var observers: [NSObjectProtocol] = []
 
     init() {
-        observer = NotificationCenter.default.addObserver(forName: Settings.didChange, object: Settings.shared,
-                                                          queue: .main) { [weak self] note in
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(forName: Settings.didChange, object: Settings.shared,
+                                            queue: .main) { [weak self] note in
             if note.userInfo?[Settings.changeKey] as? Settings.Change == .profiles {
                 self?.refreshShortcutNotes()
             }
             self?.objectWillChange.send()
-        }
+        })
+        // Approval happens in System Settings; pick it up when the user comes back.
+        observers.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil,
+                                            queue: .main) { [weak self] _ in
+            self?.refreshLoginItem()
+        })
     }
 
-    deinit { observer.map(NotificationCenter.default.removeObserver) }
+    deinit { observers.forEach(NotificationCenter.default.removeObserver) }
 
     func binding<T>(_ keyPath: ReferenceWritableKeyPath<Settings, T>) -> Binding<T> {
         Binding(get: { Settings.shared[keyPath: keyPath] },
                 set: { Settings.shared[keyPath: keyPath] = $0 })
     }
 
-    /// Login-item state lives in ServiceManagement, not UserDefaults; a failed
-    /// (un)registration snaps the switch back to the real state.
+    /// Login-item state lives in ServiceManagement, not UserDefaults. Waiting
+    /// for approval counts as on — `register()` succeeded — and `loginItemHint`
+    /// says what is left to do; a failure snaps the switch back and says why.
     var launchAtLogin: Binding<Bool> {
-        Binding(get: { SMAppService.mainApp.status == .enabled },
+        Binding(get: { [weak self] in
+                    self.map { $0.loginItemStatus == .enabled || $0.loginItemStatus == .requiresApproval } ?? false
+                },
                 set: { [weak self] on in
+                    guard let self else { return }
                     do {
                         if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+                        loginItemError = nil
                     } catch {
-                        NSSound.beep()
+                        loginItemError = error.localizedDescription
                     }
-                    self?.objectWillChange.send()
+                    refreshLoginItem()
                 })
+    }
+
+    var loginItemNeedsApproval: Bool { loginItemStatus == .requiresApproval }
+
+    var loginItemHint: String? {
+        if let loginItemError { return "⚠︎ macOS refused the change: \(loginItemError)" }
+        if loginItemNeedsApproval { return "Allow Wicher in System Settings → General → Login Items to finish turning this on." }
+        return nil
+    }
+
+    func openLoginItems() { SMAppService.openSystemSettingsLoginItems() }
+
+    func refreshLoginItem() {
+        let status = SMAppService.mainApp.status
+        if status != loginItemStatus { loginItemStatus = status }
     }
 
     // MARK: - Switchers
