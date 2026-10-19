@@ -16,6 +16,7 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     /// Non-nil exactly while a session is active.
     private var session: SwitcherSession?
     private var panelShown = false
+    private var hoverGate = HoverGate(pointer: .zero)
     private var pendingShow: DispatchWorkItem?
     /// The screen the session opened on. Fixed for the session, so a live
     /// refresh resizes the panel in place instead of chasing the mouse.
@@ -133,6 +134,7 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
         renderRows()
         panel.makeKeyAndOrderFront(nil)
         panelShown = true
+        hoverGate = HoverGate(pointer: NSEvent.mouseLocation)
         updateSelectionHighlight()
         if holdDirection != nil { startHoldTimer() }
     }
@@ -317,12 +319,30 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     // MARK: - SwitcherRowViewDelegate
 
     func rowHovered(displayIndex: Int) {
-        guard Settings.shared.selectOnHover, session?.select(rowIndex: displayIndex) == true else { return }
+        guard hoverGate.accept(pointer: NSEvent.mouseLocation),
+              Settings.shared.selectOnHover, session?.select(rowIndex: displayIndex) == true else { return }
         updateSelectionHighlight()
     }
 
     func rowClicked(displayIndex: Int) {
         guard session?.select(rowIndex: displayIndex) == true else { return }
         commit()
+    }
+}
+
+/// Tells a real hover from a row arriving under a still pointer.
+///
+/// `mouseEntered` also fires when the panel opens under the pointer, or a live
+/// refresh re-lays out the rows beneath it; selecting then would jump the
+/// selection without the user touching the mouse. So a hover counts only if
+/// the pointer has moved since the last one (or since the panel opened).
+struct HoverGate {
+    private var pointer: NSPoint
+
+    init(pointer: NSPoint) { self.pointer = pointer }
+
+    mutating func accept(pointer new: NSPoint) -> Bool {
+        defer { pointer = new }
+        return new != pointer
     }
 }

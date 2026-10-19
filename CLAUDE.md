@@ -233,5 +233,7 @@ sleep); a refresh requested during a scan re-runs afterwards rather than being d
 - A tap+release inside `showDelayMs` switches to the previous window without ever drawing
   the panel — `SwitcherSession` preselects index 1 (forward) for that reason.
 - Discrete presses wrap around the list; auto-repeat while held clamps at the ends.
+- Hover selects only after the pointer really moves (`HoverGate`): `mouseEntered` also
+  fires when the panel opens under a still pointer or a live refresh moves rows beneath it.
 - Typing switches to a flat, `FuzzyMatcher`-scored list with no section headers; matched
   ranges are bolded. An app-name-only match is scored 5 lower than a title match.

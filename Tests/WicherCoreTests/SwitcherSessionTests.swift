@@ -166,3 +166,12 @@ final class SwitcherSessionTests: XCTestCase {
         XCTAssertEqual(ranges, [], "app-name-only match highlights nothing in the title")
     }
 }
+
+final class HoverGateTests: XCTestCase {
+    func testStillPointerIsNotAHover() {
+        var gate = HoverGate(pointer: NSPoint(x: 10, y: 10))
+        XCTAssertFalse(gate.accept(pointer: NSPoint(x: 10, y: 10)), "panel opened under the pointer")
+        XCTAssertTrue(gate.accept(pointer: NSPoint(x: 10, y: 30)), "moved onto another row")
+        XCTAssertFalse(gate.accept(pointer: NSPoint(x: 10, y: 30)), "rows re-laid out under it")
+    }
+}
