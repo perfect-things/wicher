@@ -95,6 +95,7 @@ final class SwitcherListViewTests: XCTestCase {
         }
         // Snapshot for eyeballing, when asked for.
         if let dir = ProcessInfo.processInfo.environment["WICHER_SNAPSHOT_DIR"] {
+            view.appearance = NSAppearance(named: .aqua)   // dark text on the (unrendered) glass
             view.render(rows(4, header: "Minimized"), metrics: metrics)
             view.layoutSubtreeIfNeeded()
             if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {

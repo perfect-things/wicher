@@ -41,6 +41,19 @@ enum Placement: Int, Codable, CaseIterable {
     }
 }
 
+/// How a switcher's panel presents its windows.
+enum SwitcherLayout: Int, Codable, CaseIterable {
+    case list = 0   // rows: app name, icon, title
+    case icons = 1  // one row of icons, like the system ⌘Tab switcher
+
+    var title: String {
+        switch self {
+        case .list: return "List"
+        case .icons: return "Icons"
+        }
+    }
+}
+
 /// One configurable switcher: a shortcut plus the filters that shape its list.
 /// Several profiles can coexist (e.g. ⌥Tab for all windows, ⌥` for the active
 /// app's windows) — each registers its own global hot key.
@@ -54,6 +67,7 @@ struct SwitcherProfile: Codable, Identifiable, Equatable {
     var minimized: Placement
     var hidden: Placement
     var appsWithoutWindows: Placement
+    var layout: SwitcherLayout = .list
 
     var combo: HotKeyCombo {
         get { HotKeyCombo(keyCode: keyCode, carbonModifiers: carbonModifiers) }

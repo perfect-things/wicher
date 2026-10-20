@@ -150,18 +150,24 @@ private struct AppearancePane: View {
                 } label: {
                     SettingLabel("Theme", hint: "“System” follows macOS Appearance.")
                 }
-                Picker(selection: $settings.highlightStyle) {
-                    ForEach(HighlightStyle.allCases, id: \.self) { Text($0.title).tag($0) }
-                } label: {
-                    SettingLabel("Selection highlight", hint: "How the selected window is marked in the switcher.")
-                }
+            }
+
+            Section("Background") {
+                SurfaceRows(surface: $settings.backgroundSurface)
+            }
+
+            Section {
+                SurfaceRows(surface: $settings.highlightSurface)
+            } header: {
+                Text("Selection highlight")
+            } footer: {
+                Text("Solid fills with the tint color. Text switches to light or dark to stay readable on it.")
+                    .font(.callout).foregroundStyle(.secondary)
             }
 
             Section {
                 ValueSlider(title: "Icon size", value: $settings.iconSize,
                             range: HUDMetrics.iconRange, unit: "pt")
-                ValueSlider(title: "Text size", value: $settings.textSize,
-                            range: HUDMetrics.textRange, unit: "pt")
                 ValueSlider(title: "Row padding", value: $settings.rowPadding,
                             range: HUDMetrics.paddingRange, unit: "pt")
                 ValueSlider(title: "Panel width",
@@ -171,10 +177,27 @@ private struct AppearancePane: View {
                 SettingToggle("Show app names",
                               hint: "Off, each row is just the app icon and the window title.",
                               isOn: $settings.showAppNames)
+                ValueSlider(title: "Text size", value: $settings.textSize,
+                            range: HUDMetrics.textRange, unit: "pt")
             } header: {
-                Text("Switcher panel")
+                Text("List")
+            }
+
+            Section {
+                ValueSlider(title: "Icon size",
+                            subtitle: "Icons shrink to fit when there are too many for the screen.",
+                            value: $settings.gridIconSize, range: IconGridLayout.iconRange, unit: "pt")
+                ValueSlider(title: "Icon padding",
+                            subtitle: "Space between an icon and the edge of its selection highlight.",
+                            value: $settings.gridIconPadding, range: IconGridLayout.paddingRange, unit: "pt")
+                ValueSlider(title: "Icon spacing", value: $settings.gridIconSpacing,
+                            range: IconGridLayout.spacingRange, unit: "pt")
+                ValueSlider(title: "Text size", value: $settings.gridTextSize,
+                            range: IconGridLayout.textRange, unit: "pt")
+            } header: {
+                Text("Icons")
             } footer: {
-                Text("Changes here apply the next time the switcher opens.")
+                Text("Each switcher picks List or Icons in Switchers. Changes here apply the next time the switcher opens.")
                     .font(.callout).foregroundStyle(.secondary)
             }
         }
@@ -239,6 +262,7 @@ private struct ProfileRows: View {
         } label: {
             SettingLabel("Shortcut", hint: model.shortcutNotes[profile.id] ?? "")
         }
+        enumPicker("Layout", $profile.layout) { $0.title }
         enumPicker("Show windows of", $profile.scope) { $0.title }
         enumPicker("Show windows from", $profile.spaces) { $0.title }
         enumPicker("Minimized windows", $profile.minimized) { $0.title }
@@ -324,6 +348,50 @@ private struct AboutPane: View {
 }
 
 // MARK: - Shared rows
+
+/// A surface's style picker, then its tint for Light and for Dark mode.
+private struct SurfaceRows: View {
+    @Binding var surface: SurfaceAppearance
+
+    var body: some View {
+        Picker("Style", selection: $surface.style) {
+            ForEach(SurfaceStyle.allCases, id: \.self) { Text($0.title).tag($0) }
+        }
+        TintRow(title: "Light mode tint", tint: $surface.light)
+        TintRow(title: "Dark mode tint", tint: $surface.dark)
+    }
+}
+
+/// A color well and an opacity slider. Opacity is its own slider, not the
+/// color panel's, so 0% (no tint) is one drag away.
+private struct TintRow: View {
+    let title: String
+    @Binding var tint: Tint
+
+    var body: some View {
+        LabeledContent {
+            HStack(spacing: 10) {
+                ColorPicker(title, selection: color, supportsOpacity: false)
+                    .labelsHidden()
+                Slider(value: $tint.opacity[sliderStep: 1],
+                       in: Double(Tint.opacityRange.lowerBound)...Double(Tint.opacityRange.upperBound))
+                    .labelsHidden()
+                    .frame(minWidth: 80, maxWidth: 170)
+                Text("\(tint.opacity) %")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .frame(width: 52, alignment: .trailing)
+            }
+        } label: {
+            SettingLabel(title)
+        }
+    }
+
+    private var color: Binding<Color> {
+        Binding(get: { Color(nsColor: tint.color.nsColor) },
+                set: { tint.color = RGBColor(NSColor($0)) })
+    }
+}
 
 /// A labelled slider with its value printed beside it.
 private struct ValueSlider: View {

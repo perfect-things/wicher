@@ -4,6 +4,8 @@ import AppKit
 protocol SwitcherRowViewDelegate: AnyObject {
     func rowHovered(displayIndex: Int)
     func rowClicked(displayIndex: Int)
+    /// The pointer left the item at `displayIndex`.
+    func rowUnhovered(displayIndex: Int)
 }
 
 /// A single list row laid out like a classic window switcher:
@@ -22,8 +24,8 @@ final class SwitcherRowView: NSView {
     private let iconView = NSImageView()
     private let titleField = NSTextField(labelWithString: "")
     private let appField = NSTextField(labelWithString: "")
-    /// Behind the content for the glass highlight styles; made on first use.
-    private var glassView: NSGlassEffectView?
+    /// The selection highlight, behind the content; made on first selection.
+    private var highlightView: SurfaceView?
     /// Set on mouse-down inside this row, so a drag that merely *ends* over
     /// a row does not activate it.
     private var pressed = false
@@ -35,9 +37,6 @@ final class SwitcherRowView: NSView {
     init(metrics: HUDMetrics) {
         self.metrics = metrics
         super.init(frame: .zero)
-        wantsLayer = true
-        layer?.cornerRadius = metrics.rowCornerRadius
-        layer?.cornerCurve = .continuous
 
         iconView.imageScaling = .scaleProportionallyUpOrDown
         titleField.lineBreakMode = .byTruncatingTail
@@ -66,6 +65,7 @@ final class SwitcherRowView: NSView {
         iconView.image = icon
         titleField.attributedStringValue = title
         appField.stringValue = appName
+        applySelectionAppearance()   // the background may have changed since the last session
     }
 
     override func layout() {
@@ -86,42 +86,17 @@ final class SwitcherRowView: NSView {
         titleField.frame = centered(titleX, bounds.width - HUDMetrics.rowTrailingInset - titleX, titleHeight)
     }
 
+    /// Settings are read here, when the selection changes, so a change
+    /// shows the next time the panel opens.
     private func applySelectionAppearance() {
-        let style = Settings.shared.highlightStyle
-        if isSelected && style.isGlass { showGlass(style) } else { glassView?.isHidden = true }
-
-        // Colors are resolved to CGColors here, so re-apply when the
-        // effective appearance (light/dark) changes too.
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            let fill: NSColor
-            switch (isSelected, style) {
-            case (false, _), (true, .glass), (true, .clearGlass), (true, .tintedGlass): fill = .clear
-            case (true, .accent): fill = .controlAccentColor
-            case (true, .neutral): fill = NSColor.labelColor.withAlphaComponent(0.1)
-            }
-            layer?.backgroundColor = fill.cgColor
+        let settings = Settings.shared
+        if isSelected {
+            highlightView = highlightView ?? SurfaceView.highlight(in: self, cornerRadius: metrics.rowCornerRadius)
+            highlightView?.surface = settings.highlightSurface
         }
-        let onAccent = isSelected && style == .accent
-        titleField.textColor = onAccent ? .alternateSelectedControlTextColor : .labelColor
-        appField.textColor = onAccent
-            ? NSColor.alternateSelectedControlTextColor.withAlphaComponent(0.85)
-            : .secondaryLabelColor
-    }
-
-    private func showGlass(_ style: HighlightStyle) {
-        let glass = glassView ?? {
-            let glass = NSGlassEffectView()
-            glass.cornerRadius = metrics.rowCornerRadius
-            glass.frame = bounds
-            glass.autoresizingMask = [.width, .height]
-            addSubview(glass, positioned: .below, relativeTo: nil)
-            glassView = glass
-            return glass
-        }()
-        glass.style = style == .clearGlass ? .clear : .regular
-        glass.tintColor = style == .tintedGlass ? NSColor.controlAccentColor.withAlphaComponent(0.4)
-            : effectiveAppearance.isDark ? nil : HighlightStyle.lightRowTint
-        glass.isHidden = false
+        highlightView?.isHidden = !isSelected
+        let text = SurfaceView.textAppearance(selected: isSelected)
+        for field in [titleField, appField] { field.appearance = text }
     }
 
     override func viewDidChangeEffectiveAppearance() {

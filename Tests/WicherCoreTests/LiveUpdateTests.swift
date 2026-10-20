@@ -116,6 +116,37 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(Settings(defaults: defaults).showMenuBarIcon)
     }
 
+    func testSurfacesAndGridSizesRoundTrip() {
+        let settings = Settings(defaults: defaults)
+        XCTAssertEqual(settings.backgroundSurface, .defaultBackground)
+        XCTAssertEqual(settings.highlightSurface, .defaultHighlight)
+        XCTAssertEqual(settings.gridIconSize, 96)
+
+        let red = SurfaceAppearance(style: .blurred, light: Tint(color: RGBColor(red: 1, green: 0, blue: 0), opacity: 50),
+                                    dark: Tint(color: .white, opacity: 5))
+        XCTAssertTrue(changes(of: { _ = settings.backgroundSurface }) { settings.backgroundSurface = red })
+        settings.highlightSurface.style = .solid
+        settings.gridIconSize = 1000
+        settings.gridIconSpacing = 3
+        settings.gridIconPadding = 20
+        XCTAssertEqual(settings.gridIconSize, IconGridLayout.iconRange.upperBound)
+
+        let reloaded = Settings(defaults: defaults)
+        XCTAssertEqual(reloaded.backgroundSurface, red)
+        XCTAssertEqual(reloaded.highlightSurface.style, .solid)
+        XCTAssertEqual(reloaded.gridIconSize, IconGridLayout.iconRange.upperBound)
+        XCTAssertEqual(reloaded.gridIconSpacing, 3)
+        XCTAssertEqual(reloaded.gridIconPadding, 20)
+        XCTAssertEqual(reloaded.iconSize, 32, "List sizes are separate")
+    }
+
+    func testProfileLayoutRoundTrips() {
+        let settings = Settings(defaults: defaults)
+        XCTAssertTrue(settings.profiles.allSatisfy { $0.layout == .list })
+        settings[profileID: settings.profiles[0].id].layout = .icons
+        XCTAssertEqual(Settings(defaults: defaults).profiles[0].layout, .icons)
+    }
+
     func testSameValueIsNotObserved() {
         let settings = Settings(defaults: defaults)
         XCTAssertFalse(changes(of: { _ = settings.iconSize; _ = settings.selectOnHover; _ = settings.profiles }) {

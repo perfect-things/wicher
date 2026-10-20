@@ -16,12 +16,16 @@ Apple Silicon, macOS 26+. Needs only **Accessibility** access (no Screen Recordi
 ## Usage
 
 - **⌥Tab** opens the switcher; hold ⌥ and tap Tab to cycle, release ⌥ to switch.
-  **⇧⌥Tab** cycles backward, **Esc** cancels. ↑/↓, scroll and the mouse work too.
-- **Type** to fuzzy-search window titles and app names.
+  **⇧⌥Tab** cycles backward, **Esc** cancels. Arrow keys, scroll and the mouse work too.
+- **Type** to fuzzy-search window titles and app names; **Esc** clears the search.
 - **⌥\`** shows only the current app's windows.
 - Add more switchers, each with its own shortcut and filters, in **Settings**
   (menu-bar icon, or ⌘, while the switcher is open). Any chord can be recorded,
   including ⌘Tab — it replaces the system shortcut while wicher runs.
+- Each switcher shows a **List** of windows or a row of **Icons**, like ⌘Tab; each
+  layout has its own sizes in **Settings → Appearance**.
+- **Appearance**: Glass, Clear glass, Blurred or Solid for the background and the
+  selection highlight, each with its own tint for Light and Dark mode.
 
 ## Build
 

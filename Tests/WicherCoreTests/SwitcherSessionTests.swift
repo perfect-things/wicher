@@ -118,6 +118,18 @@ final class SwitcherSessionTests: XCTestCase {
         XCTAssertFalse(s.deleteBackward())
     }
 
+    func testClearQueryRestoresTheFullList() {
+        var s = session([window("alpha"), window("beta")])
+        XCTAssertFalse(s.clearQuery(), "nothing to clear: Esc closes the panel")
+        s.appendToQuery("b")
+        s.appendToQuery("e")
+        XCTAssertEqual(labels(s), ["beta"])
+        XCTAssertTrue(s.clearQuery())
+        XCTAssertEqual(s.query, "")
+        XCTAssertEqual(labels(s), ["alpha", "beta"])
+        XCTAssertFalse(s.clearQuery())
+    }
+
     func testSearchIsFlatWithHighlightRanges() {
         var s = session([window("w0"), window("mail", minimized: true)])
         s.appendToQuery("m")

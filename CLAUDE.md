@@ -44,9 +44,9 @@ The package is split so the code is testable: `Sources/WicherCore` (library, all
 code) and `Sources/wicher` (executable: just `main.swift` → `WicherApp.run()`). Tests
 in `Tests/WicherCoreTests` use `@testable import WicherCore` and cover the pure pieces —
 `WindowAssembly` (the scan → rows classification), `WindowGrouping`, `FuzzyMatcher`,
-`HUDMetrics`, `SwitcherSession` (incl. live updates), `HotKeyCombo`, `Settings` (via
-`Settings(defaults:)` on a test suite) — plus `SwitcherListView` layout rendered
-offscreen, and the Settings window's panes. Fixtures are hand-built (`axWindow: nil`;
+`HUDMetrics`, `IconGridLayout`, `TextContrast`, `SwitcherSession` (incl. live updates),
+`HotKeyCombo`, `Settings` (via `Settings(defaults:)` on a test suite) — plus
+`SwitcherListView` and `SwitcherIconGridView` layout rendered offscreen, and the Settings window's panes. Fixtures are hand-built (`axWindow: nil`;
 `AXUIElementCreateApplication` is fine where an element is required — it does no IPC).
 The AX/CGWindowList *collection*, hot keys, activation and the live HUD have no tests;
 verify those by building the app, granting Accessibility, and exercising ⌥Tab. Set
@@ -100,10 +100,17 @@ database. Flow of one switch:
    event monitors, panel placement, commit. It drives two pieces:
    - **`SwitcherSession`** — value-type model of one session: rows for the current query
      (grouped, or fuzzy-scored when searching) and the selection. No views or timers.
-   - **`SwitcherListView`** — the panel's content view: backdrop, search bar, rows,
-     selection highlight, preferred height. Row/header views are **pooled and placed by
-     frame** (heights come from `HUDMetrics`); don't reintroduce per-render view
-     creation or Auto Layout in rows.
+   - A **`SwitcherContentView`**, picked per session from `SwitcherProfile.layout`:
+     **`SwitcherListView`** (List: backdrop, search bar, rows, selection highlight) or
+     **`SwitcherIconGridView`** (Icons: one row of icons like ⌘Tab, the hovered — else
+     selected — window's title under it, middle-truncated). Each reads its own sizes
+     from `Settings` in `beginSession` and reports the panel window's whole size
+     (`preferredWindowSize`; the Icons width follows the icon count), so the controller
+     re-sizes and re-centers on every render. Row/cell/header views are **pooled and
+     placed by frame** (from `HUDMetrics` / `IconGridLayout`); don't reintroduce
+     per-render view creation or Auto Layout in them. Both share `HUDSearchBar`: a bar
+     of its own above the List; in Icons it overlays the top padding at the title's size, centered,
+     mirroring the title, so searching doesn't grow the panel. Its glyphs are SF Symbols.
    While the panel is shown it observes `WindowEnumerator.didRefresh` and calls
    `SwitcherSession.update(enumeration:)`, which keeps the selection by `WindowInfo.key`.
    Never before the panel is shown — a quick tap must commit the preselected window.
@@ -143,7 +150,20 @@ searches when the shortcut is ⌘Tab.
 `HUDMetrics.make(iconSize:textSize:rowPadding:)` derives every pixel dimension — don't
 hardcode row heights or panel widths elsewhere. That includes the corners, which are
 concentric: `rowCornerRadius = panelCornerRadius − listInset` (capped at a capsule), with
-`listInset` equal on all four sides.
+`listInset` equal on all four sides. The Icons layout's equivalent is
+`IconGridLayout.make` (own settings: `gridIconSize`/`gridIconPadding`/`gridTextSize`/
+`gridIconSpacing`): padding equal on all sides with the title inside the bottom one (as
+in ⌘Tab), icons/padding/spacing shrunk by one factor to fit `maxScreenFraction` (95%) of
+the screen, and the title clamped inside the panel's edges. The highlight hugs the icon's
+visible shape (824/1024 of the image — app icons carry a transparent margin), so its
+radius = the shape's corner radius + padding, and padding 0 means no highlight; panel
+radius = that + inset. The default panel is Clear glass (like ⌘Tab), the default highlight Glass.
+Corners are continuous (squircle) everywhere: `NSGlassEffectView` only draws circular
+arcs, so highlights (no content) draw glass with SwiftUI `glassEffect` in a `.continuous`
+`RoundedRectangle` (`ShapedGlassView`, hit-testing off); Blurred's mask is rendered by a
+continuous-corner `CALayer`. A Solid panel's shadow fades with its opacity.
+Don't try to add blur under glass with an `NSVisualEffectView`: tried, it didn't blur
+and bled past the corners. The glass's frost comes from its style: Glass (`.regular`) vs Clear glass (`.clear`).
 
 Swift 6 language mode. The UI types, `Settings`, `HotKeyCenter` and
 `SystemHotKeyOverride` are `@MainActor`. Callbacks the compiler can't see are on the main
@@ -154,14 +174,22 @@ synchronous): its `@MainActor` half is MRU + refresh machinery, the rest is `loc
 snapshot/caches written from `scanQueue` — see its doc comment before adding state.
 
 The deployment target is macOS 26, so Liquid Glass is always available — no fallbacks.
-The HUD backdrop is `NSGlassEffectView`, with the search bar and list in its
-`contentView`; it doesn't render in an offscreen snapshot. Glass is composited by the
+The panel background and the selection highlight are each a **`SurfaceView`**, drawn
+from a `SurfaceAppearance` (`Settings.backgroundSurface` / `highlightSurface`): Glass
+(`NSGlassEffectView` `.regular`: frosted), Clear glass (`.clear`: see-through), Blurred (`NSVisualEffectView`, `state = .active` — wicher is never
+the active app) or Solid, plus a tint color + opacity for Light and for Dark mode (Solid
+fills with the tint). The defaults (`.defaultBackground` / `.defaultHighlight`)
+reproduce the original look. The panel's content must be the glass's `contentView`, so a
+style change re-parents `SurfaceView.content` into a new effect view. Glass doesn't
+render in an offscreen snapshot. Text stays readable via `TextContrast`: labels get
+an `appearance` override (aqua/darkAqua) when the tints they sit on come out the
+opposite of the mode — so read the mode from `NSApplication.shared.isDarkMode`, never
+from a view's `effectiveAppearance`. Glass is composited by the
 window server and spills a soft edge past its bounds, so the panel window is `HUDMetrics.windowMargin`
 larger than the glass on every side and has no window shadow — a window cut flush to
 the glass showed a square outline (shadow) and clipped glow patches at the corners.
-The selected row's look is `Settings.highlightStyle` (`HighlightStyle`, default `.glass`):
-the glass styles put a lazily made `NSGlassEffectView` behind the row's content; only
-`.accent` switches text to white.
+Non-glass panels get a soft layer shadow from their `SurfaceView` instead. Rows and
+icon cells make their highlight `SurfaceView` lazily, on first selection.
 Rows are re-placed on the scroll view's clip-view frame changes, not in `layout()`:
 inside the glass the scroll view settles after the list view's own layout pass.
 
@@ -235,5 +263,6 @@ sleep); a refresh requested during a scan re-runs afterwards rather than being d
 - Discrete presses wrap around the list; auto-repeat while held clamps at the ends.
 - Hover selects only after the pointer really moves (`HoverGate`): `mouseEntered` also
   fires when the panel opens under a still pointer or a live refresh moves rows beneath it.
+- Esc clears a non-empty search; with none, it closes the panel.
 - Typing switches to a flat, `FuzzyMatcher`-scored list with no section headers; matched
-  ranges are bolded. An app-name-only match is scored 5 lower than a title match.
+ranges are colored (`NSColor.searchMatch`, pastel amber). An app-name-only match is scored 5 lower than a title match.

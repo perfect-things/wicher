@@ -5,8 +5,8 @@ private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
-/// The HUD's whole content: rounded glass backdrop, the search bar, and the
-/// scrolling list of rows. Turns `[DisplayRow]` into views, shows the
+/// The List layout's whole content: the rounded background, the search bar,
+/// and the scrolling list of rows. Turns `[DisplayRow]` into views, shows the
 /// selection, and reports the height it wants. Knows nothing about sessions,
 /// screens or the panel it sits in.
 ///
@@ -14,38 +14,28 @@ private final class FlippedView: NSView {
 /// re-renders on every keystroke, and with dozens of windows rebuilding meant
 /// dozens of view allocations and hundreds of constraints per character. Rows
 /// have fixed heights from `HUDMetrics`, so they are placed by frame.
-final class SwitcherListView: NSView {
-    /// Receives hover/click from every row this view creates.
+final class SwitcherListView: NSView, SwitcherContentView {
     weak var rowDelegate: SwitcherRowViewDelegate?
 
-    /// The Liquid Glass panel; `content` is its `contentView`.
-    private let backdrop: NSGlassEffectView
-    /// Everything drawn on top of the backdrop. Glass needs it as its
-    /// `contentView` to render (and tint) it correctly.
-    private let content = NSView()
-    private let searchContainer = NSView()
-    private let searchField = NSTextField(labelWithString: "")
+    /// The panel's background; the search bar and list are in its `content`.
+    private let backdrop = SurfaceView.panel()
+    private let searchBar = HUDSearchBar()
     private let scrollView = NSScrollView()
     private let document = FlippedView()
     /// Shown in place of the rows when there are none.
     private let emptyLabel = NSTextField(labelWithString: "")
-    private var searchHeight: NSLayoutConstraint!
     private var query = ""
-    /// Shown in the search bar's place while there is no query — e.g. a
-    /// warning that Accessibility access is off.
-    private var notice: String?
+    /// Screen height, for capping the list (it scrolls beyond).
+    private var screenHeight: CGFloat = 900
 
     private var rows: [DisplayRow] = []
     private var metrics = HUDMetrics.make(iconSize: 32, textSize: 16, rowPadding: 7)
+    /// From the settings at `beginSession`; applied by the next `render`.
+    private var sessionMetrics = HUDMetrics.make(iconSize: 32, textSize: 16, rowPadding: 7)
     /// Reusable views. Index i is the i-th item (or header) of the current render.
     private var itemPool: [SwitcherRowView] = []
     private var headerPool: [SwitcherHeaderView] = []
     private var rowViews: [Int: SwitcherRowView] = [:] // row index -> view, current render only
-
-    /// Corner radius of the HUD; see `HUDMetrics` for how the row highlight's
-    /// radius follows from it.
-    private static let cornerRadius = HUDMetrics.defaultPanelCornerRadius
-    private static let searchBarHeight: CGFloat = 52
 
     /// Padding around the list inside the scroll view — equal on all sides,
     /// which is what makes the highlight's corners concentric with the panel's.
@@ -55,28 +45,8 @@ final class SwitcherListView: NSView {
     }
 
     init() {
-        backdrop = Self.makeBackdrop()
         super.init(frame: .zero)
         build()
-    }
-
-    private static func makeBackdrop() -> NSGlassEffectView {
-        let glass = NSGlassEffectView()
-        glass.style = .regular
-        glass.cornerRadius = cornerRadius
-        return glass
-    }
-
-    /// Untinted glass over a white window is nearly white in Light mode, and
-    /// the row highlight barely shows on it. A gray tint gives the panel the
-    /// light-gray glass of the system ⌘Tab switcher. Dark mode is fine as is.
-    private func applyBackdropTint() {
-        backdrop.tintColor = effectiveAppearance.isDark ? nil : HighlightStyle.lightPanelTint
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        applyBackdropTint()
     }
 
     required init?(coder: NSCoder) { preconditionFailure("not used") }
@@ -86,19 +56,7 @@ final class SwitcherListView: NSView {
 
         backdrop.translatesAutoresizingMaskIntoConstraints = false
         addSubview(backdrop)
-        content.translatesAutoresizingMaskIntoConstraints = false
-        backdrop.contentView = content
-        applyBackdropTint()
-
-        searchContainer.wantsLayer = true
-        searchContainer.layer?.masksToBounds = true
-        searchContainer.translatesAutoresizingMaskIntoConstraints = false
-
-        searchField.font = .systemFont(ofSize: 18, weight: .regular)
-        searchField.textColor = .labelColor
-        searchField.lineBreakMode = .byTruncatingTail
-        searchField.translatesAutoresizingMaskIntoConstraints = false
-        searchContainer.addSubview(searchField)
+        let content = backdrop.content
 
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = false
@@ -115,10 +73,9 @@ final class SwitcherListView: NSView {
         emptyLabel.isHidden = true
         document.addSubview(emptyLabel)
 
-        content.addSubview(searchContainer)
+        content.addSubview(searchBar)
         content.addSubview(scrollView)
 
-        searchHeight = searchContainer.heightAnchor.constraint(equalToConstant: 0)
         // The visible panel sits `windowMargin` inside this view (the panel
         // window's content view); see `HUDMetrics.windowMargin`.
         let margin = HUDMetrics.glassWindowMargin
@@ -128,21 +85,11 @@ final class SwitcherListView: NSView {
             backdrop.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -margin),
             backdrop.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -margin),
 
-            content.topAnchor.constraint(equalTo: backdrop.topAnchor),
-            content.leadingAnchor.constraint(equalTo: backdrop.leadingAnchor),
-            content.trailingAnchor.constraint(equalTo: backdrop.trailingAnchor),
-            content.bottomAnchor.constraint(equalTo: backdrop.bottomAnchor),
+            searchBar.topAnchor.constraint(equalTo: content.topAnchor),
+            searchBar.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            searchBar.trailingAnchor.constraint(equalTo: content.trailingAnchor),
 
-            searchContainer.topAnchor.constraint(equalTo: content.topAnchor),
-            searchContainer.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            searchContainer.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            searchHeight,
-
-            searchField.centerYAnchor.constraint(equalTo: searchContainer.centerYAnchor),
-            searchField.leadingAnchor.constraint(equalTo: searchContainer.leadingAnchor, constant: 22),
-            searchField.trailingAnchor.constraint(equalTo: searchContainer.trailingAnchor, constant: -22),
-
-            scrollView.topAnchor.constraint(equalTo: searchContainer.bottomAnchor),
+            scrollView.topAnchor.constraint(equalTo: searchBar.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
@@ -151,33 +98,52 @@ final class SwitcherListView: NSView {
 
     // MARK: - Content
 
-    /// Shows the search bar for a non-empty query; hides it otherwise.
+    func beginSession(screenSize: CGSize) {
+        let settings = Settings.shared
+        sessionMetrics = HUDMetrics.make(iconSize: settings.iconSize,
+                                         textSize: settings.textSize,
+                                         rowPadding: settings.rowPadding,
+                                         widthScale: settings.panelWidthScale,
+                                         showAppNames: settings.showAppNames)
+        screenHeight = screenSize.height
+        backdrop.surface = settings.backgroundSurface
+        applyTextAppearance()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyTextAppearance()
+    }
+
+    /// Rows do their own (see `SwitcherRowView`).
+    private func applyTextAppearance() {
+        let text = SurfaceView.textAppearance(selected: false)
+        searchBar.setTextAppearance(text)
+        emptyLabel.appearance = text
+        headerPool.forEach { $0.appearance = text }
+    }
+
     func setQuery(_ query: String) {
         self.query = query
-        updateSearchBar()
+        searchBar.setQuery(query)
         updateEmptyLabel()
     }
 
-    /// Shows `notice` in the search bar's place whenever there is no query.
     func setNotice(_ notice: String?) {
-        self.notice = notice
-        updateSearchBar()
+        searchBar.setNotice(notice)
     }
 
-    private func updateSearchBar() {
-        if !query.isEmpty {
-            searchField.stringValue = "🔍  \(query)"
-            searchField.font = .systemFont(ofSize: 18, weight: .regular)
-            searchField.textColor = .labelColor
-        } else if let notice {
-            searchField.stringValue = "⚠︎  \(notice)"
-            searchField.font = .systemFont(ofSize: 13, weight: .medium)
-            searchField.textColor = .secondaryLabelColor
-        } else {
-            searchField.stringValue = ""
-        }
-        searchHeight.constant = (query.isEmpty && notice == nil) ? 0 : Self.searchBarHeight
+    func render(_ rows: [DisplayRow]) {
+        render(rows, metrics: sessionMetrics)
     }
+
+    /// The list is capped at 70% of the screen's height; it scrolls beyond.
+    var preferredWindowSize: CGSize {
+        metrics.windowSize(panelHeight: preferredHeight(maxListHeight: screenHeight * 0.7))
+    }
+
+    func setHovered(rowIndex: Int?) {}
+    func setHovered(rowIndex: Int?, ifHovering: Int) {}
 
     /// Shows `rows`, reusing row views from the previous render.
     func render(_ rows: [DisplayRow], metrics: HUDMetrics) {
@@ -199,6 +165,7 @@ final class SwitcherListView: NSView {
             case let .header(title):
                 if headers == headerPool.count {
                     let header = SwitcherHeaderView(metrics: metrics)
+                    header.appearance = SurfaceView.textAppearance(selected: false)
                     headerPool.append(header)
                     document.addSubview(header)
                 }
@@ -298,10 +265,7 @@ final class SwitcherListView: NSView {
             string: title,
             attributes: [.font: NSFont.systemFont(ofSize: metrics.titleSize, weight: .regular)]
         )
-        let bold = NSFont.systemFont(ofSize: metrics.titleSize, weight: .bold)
-        for range in ranges where range.location + range.length <= attr.length {
-            attr.addAttribute(.font, value: bold, range: range)
-        }
+        attr.highlightSearchMatches(ranges)
         return attr
     }
 
@@ -320,6 +284,6 @@ final class SwitcherListView: NSView {
             }
         }
         if rows.isEmpty { contentHeight += metrics.rowHeight }
-        return searchHeight.constant + min(contentHeight, maxListHeight)
+        return searchBar.barHeight + min(contentHeight, maxListHeight)
     }
 }

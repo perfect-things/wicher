@@ -25,9 +25,14 @@ final class Settings {
         static let showDelayMs = "showDelayMs"
         static let profiles = "profiles"
         static let showMenuBarIcon = "showMenuBarIcon"
-        static let highlightStyle = "highlightStyle"
+        static let backgroundSurface = "backgroundSurface"
+        static let highlightSurface = "highlightSurface"
         static let showAppNames = "showAppNames"
         static let panelWidthScale = "panelWidthScale"
+        static let gridIconSize = "gridIconSize"
+        static let gridTextSize = "gridTextSize"
+        static let gridIconSpacing = "gridIconSpacing"
+        static let gridIconPadding = "gridIconPadding"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -41,31 +46,38 @@ final class Settings {
             Key.scrollSelects: true,
             Key.showDelayMs: 180,
             Key.showMenuBarIcon: true,
-            Key.highlightStyle: HighlightStyle.glass.rawValue,
             Key.showAppNames: true,
             Key.panelWidthScale: 100,
+            Key.gridIconSize: 96,
+            Key.gridTextSize: 13,
+            Key.gridIconSpacing: 12,
+            Key.gridIconPadding: 8,
         ])
         appearanceMode = AppearanceMode(rawValue: defaults.integer(forKey: Key.appearance)) ?? .system
-        highlightStyle = HighlightStyle(rawValue: defaults.integer(forKey: Key.highlightStyle)) ?? .glass
+        backgroundSurface = Self.decode(defaults.data(forKey: Key.backgroundSurface)) ?? .defaultBackground
+        highlightSurface = Self.decode(defaults.data(forKey: Key.highlightSurface)) ?? .defaultHighlight
         iconSize = defaults.integer(forKey: Key.iconSize).clamped(to: HUDMetrics.iconRange)
         textSize = defaults.integer(forKey: Key.textSize).clamped(to: HUDMetrics.textRange)
         panelWidthScale = defaults.integer(forKey: Key.panelWidthScale).clamped(to: HUDMetrics.widthScaleRange)
         showAppNames = defaults.bool(forKey: Key.showAppNames)
         rowPadding = defaults.integer(forKey: Key.rowPadding).clamped(to: HUDMetrics.paddingRange)
+        gridIconSize = defaults.integer(forKey: Key.gridIconSize).clamped(to: IconGridLayout.iconRange)
+        gridTextSize = defaults.integer(forKey: Key.gridTextSize).clamped(to: IconGridLayout.textRange)
+        gridIconSpacing = defaults.integer(forKey: Key.gridIconSpacing).clamped(to: IconGridLayout.spacingRange)
+        gridIconPadding = defaults.integer(forKey: Key.gridIconPadding).clamped(to: IconGridLayout.paddingRange)
         selectOnHover = defaults.bool(forKey: Key.hoverSelects)
         selectOnScroll = defaults.bool(forKey: Key.scrollSelects)
         showDelayMs = max(0, defaults.integer(forKey: Key.showDelayMs))
         showMenuBarIcon = defaults.bool(forKey: Key.showMenuBarIcon)
 
-        let decoded = defaults.data(forKey: Key.profiles)
-            .flatMap { try? JSONDecoder().decode([SwitcherProfile].self, from: $0) }
+        let decoded: [SwitcherProfile]? = Self.decode(defaults.data(forKey: Key.profiles))
         if let decoded, !decoded.isEmpty {
             profiles = decoded
         } else {
             // Persisted (`didSet` doesn't run in `init`), so the generated
             // defaults keep their UUIDs across launches.
             profiles = SwitcherProfile.defaults()
-            persist(profiles: profiles)
+            persist(profiles, Key.profiles)
         }
     }
 
@@ -73,13 +85,18 @@ final class Settings {
         didSet { store(appearanceMode.rawValue, oldValue.rawValue, Key.appearance) }
     }
 
-    /// How the switcher draws the selected row. Read by each row when its
-    /// selection changes, so a change shows the next time the panel opens.
-    var highlightStyle: HighlightStyle {
-        didSet { store(highlightStyle.rawValue, oldValue.rawValue, Key.highlightStyle) }
+    /// The switcher panel's background. Applied when a session begins.
+    var backgroundSurface: SurfaceAppearance {
+        didSet { if backgroundSurface != oldValue { persist(backgroundSurface, Key.backgroundSurface) } }
     }
 
-    /// Icon size in points; panel width scales from it.
+    /// How the switcher draws the selected item. Read by each item when its
+    /// selection changes, so a change shows the next time the panel opens.
+    var highlightSurface: SurfaceAppearance {
+        didSet { if highlightSurface != oldValue { persist(highlightSurface, Key.highlightSurface) } }
+    }
+
+    /// List layout: icon size in points; panel width scales from it.
     var iconSize: Int {
         didSet {
             let clamped = iconSize.clamped(to: HUDMetrics.iconRange)
@@ -88,7 +105,7 @@ final class Settings {
         }
     }
 
-    /// Window-title text size in points.
+    /// List layout: window-title text size in points.
     var textSize: Int {
         didSet {
             let clamped = textSize.clamped(to: HUDMetrics.textRange)
@@ -121,6 +138,43 @@ final class Settings {
         }
     }
 
+    /// Icons layout: icon size in points, before it is scaled down to fit.
+    var gridIconSize: Int {
+        didSet {
+            let clamped = gridIconSize.clamped(to: IconGridLayout.iconRange)
+            if clamped != gridIconSize { gridIconSize = clamped; return }
+            store(gridIconSize, oldValue, Key.gridIconSize)
+        }
+    }
+
+    /// Icons layout: size of the title under the icons, in points.
+    var gridTextSize: Int {
+        didSet {
+            let clamped = gridTextSize.clamped(to: IconGridLayout.textRange)
+            if clamped != gridTextSize { gridTextSize = clamped; return }
+            store(gridTextSize, oldValue, Key.gridTextSize)
+        }
+    }
+
+    /// Icons layout: space between an icon and the edge of its selection
+    /// highlight, in points.
+    var gridIconPadding: Int {
+        didSet {
+            let clamped = gridIconPadding.clamped(to: IconGridLayout.paddingRange)
+            if clamped != gridIconPadding { gridIconPadding = clamped; return }
+            store(gridIconPadding, oldValue, Key.gridIconPadding)
+        }
+    }
+
+    /// Icons layout: gap between neighboring icons' highlights, in points.
+    var gridIconSpacing: Int {
+        didSet {
+            let clamped = gridIconSpacing.clamped(to: IconGridLayout.spacingRange)
+            if clamped != gridIconSpacing { gridIconSpacing = clamped; return }
+            store(gridIconSpacing, oldValue, Key.gridIconSpacing)
+        }
+    }
+
     var selectOnHover: Bool {
         didSet { store(selectOnHover, oldValue, Key.hoverSelects) }
     }
@@ -148,7 +202,7 @@ final class Settings {
         didSet {
             if profiles.isEmpty { profiles = SwitcherProfile.defaults(); return }
             guard profiles != oldValue else { return }
-            persist(profiles: profiles)
+            persist(profiles, Key.profiles)
         }
     }
 
@@ -168,10 +222,15 @@ final class Settings {
         defaults.set(value, forKey: key)
     }
 
-    private func persist(profiles: [SwitcherProfile]) {
-        if let data = try? JSONEncoder().encode(profiles) {
-            defaults.set(data, forKey: Key.profiles)
+    /// Values without a plist form go in as JSON.
+    private func persist<T: Encodable>(_ value: T, _ key: String) {
+        if let data = try? JSONEncoder().encode(value) {
+            defaults.set(data, forKey: key)
         }
+    }
+
+    private static func decode<T: Decodable>(_ data: Data?) -> T? {
+        data.flatMap { try? JSONDecoder().decode(T.self, from: $0) }
     }
 }
 

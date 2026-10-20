@@ -6,12 +6,15 @@ import Carbon.HIToolbox
 /// all without an event tap.
 ///
 /// What is on offer and what is selected lives in `SwitcherSession`; turning
-/// that into views lives in `SwitcherListView`. This class wires the two to
+/// that into views lives in the profile's `SwitcherContentView` (List or Icons). This class wires the two to
 /// hot keys, monitors and the panel.
 @MainActor
 final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     private let panel = SwitcherPanel()
     private let listView = SwitcherListView()
+    private let gridView = SwitcherIconGridView()
+    /// The view for the current (or last) session's layout.
+    private var contentView: SwitcherContentView
 
     /// Non-nil exactly while a session is active.
     private var session: SwitcherSession?
@@ -21,7 +24,6 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     /// The screen the session opened on. Fixed for the session, so a live
     /// refresh resizes the panel in place instead of chasing the mouse.
     private var sessionScreen: NSScreen?
-    private var metrics = HUDMetrics.make(iconSize: 32, textSize: 16, rowPadding: 7)
 
     /// Called for ⌘, in the panel, after the session is cancelled.
     var onOpenSettings: () -> Void = {}
@@ -37,8 +39,10 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     private let holdRepeatInterval: TimeInterval = 0.05
 
     override init() {
+        contentView = listView
         super.init()
         listView.rowDelegate = self
+        gridView.rowDelegate = self
         panel.contentView = listView
         NotificationCenter.default.addObserver(self, selector: #selector(windowsRefreshed),
                                                name: WindowEnumerator.didRefresh, object: nil)
@@ -94,12 +98,10 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     // MARK: - Session lifecycle
 
     private func beginSession(profile: SwitcherProfile, forward: Bool) {
-        metrics = HUDMetrics.make(iconSize: Settings.shared.iconSize,
-                                  textSize: Settings.shared.textSize,
-                                  rowPadding: Settings.shared.rowPadding,
-                                  widthScale: Settings.shared.panelWidthScale,
-                                  showAppNames: Settings.shared.showAppNames)
         sessionScreen = screenWithMouse() ?? NSScreen.main
+        contentView = profile.layout == .icons ? gridView : listView
+        if panel.contentView !== contentView { panel.contentView = contentView }
+        contentView.beginSession(screenSize: screenFrame.size)
         let activeAppPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         // Make sure the window currently in front is the most-recent one, so a
         // quick tap selects the genuine previous window (see SwitcherSession.init).
@@ -108,11 +110,11 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
                                   enumeration: WindowEnumerator.shared.enumerate(),
                                   activeAppPID: activeAppPID,
                                   forward: forward)
-        listView.setQuery("")
+        contentView.setQuery("")
         // Without Accessibility trust, every row comes from the CGWindowList
         // fallback, which has no titles — say so rather than silently listing
         // bare app names.
-        listView.setNotice(AXIsProcessTrusted()
+        contentView.setNotice(AXIsProcessTrusted()
             ? nil
             : "Accessibility access is off — window titles unavailable. Re-enable Wicher in System Settings.")
 
@@ -146,7 +148,7 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
         holdDirection = nil
         stopMonitors()
         if panelShown { panel.orderOut(nil) }
-        listView.clear()
+        contentView.clear()
         session = nil
         sessionScreen = nil
         panelShown = false
@@ -199,8 +201,10 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
             if triggerReleased(by: event) { commit() }
             return event
         case .scrollWheel:
-            if panelShown, Settings.shared.selectOnScroll, event.deltaY != 0 {
-                advance(by: event.deltaY < 0 ? 1 : -1)
+            // Horizontal scrolling too, for the Icons layout's single row.
+            let delta = event.deltaY != 0 ? event.deltaY : event.deltaX
+            if panelShown, Settings.shared.selectOnScroll, delta != 0 {
+                advance(by: delta < 0 ? 1 : -1)
                 return nil
             }
             return event
@@ -227,14 +231,15 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(trigger)
         switch Int(event.keyCode) {
         case kVK_Escape:
-            cancel()
+            // A search is cleared first; Esc on no search closes the panel.
+            if session?.clearQuery() == true { queryChanged() } else { cancel() }
         case kVK_Return, kVK_ANSI_KeypadEnter:
             commit()
         case kVK_Tab:
             advance(by: mods.contains(.shift) ? -1 : 1)
-        case kVK_DownArrow:
+        case kVK_DownArrow, kVK_RightArrow:
             advance(by: 1)
-        case kVK_UpArrow:
+        case kVK_UpArrow, kVK_LeftArrow:
             advance(by: -1)
         case kVK_Delete:
             if session?.deleteBackward() == true { queryChanged() }
@@ -253,7 +258,7 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
 
     private func queryChanged() {
         guard let session else { return }
-        listView.setQuery(session.query)
+        contentView.setQuery(session.query)
         if panelShown {
             renderRows()
             updateSelectionHighlight()
@@ -268,7 +273,7 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     }
 
     private func updateSelectionHighlight() {
-        listView.highlight(rowIndex: session?.selectedRowIndex)
+        contentView.highlight(rowIndex: session?.selectedRowIndex)
     }
 
     // MARK: - Auto-repeat while held
@@ -296,19 +301,24 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     // MARK: - Panel
 
     /// Renders the session's rows, then sizes the panel to them and centers it
-    /// on the screen with the mouse.
+    /// on the screen with the mouse. Both dimensions come from the view: the
+    /// Icons layout's width follows the number of icons.
     private func renderRows() {
         guard let session else { return }
-        listView.render(session.rows, metrics: metrics)
+        contentView.render(session.rows)
 
-        let frame = sessionScreen?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let size = metrics.windowSize(panelHeight: listView.preferredHeight(maxListHeight: frame.height * 0.7))
+        let frame = screenFrame
+        let size = contentView.preferredWindowSize
         let origin = NSPoint(x: frame.midX - size.width / 2,
                              y: frame.midY - size.height / 2)
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
         // The window shadow is cached from the previous opaque shape; without
         // this it keeps the old (or square) outline after a resize.
         panel.invalidateShadow()
+    }
+
+    private var screenFrame: NSRect {
+        sessionScreen?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
     }
 
     private func screenWithMouse() -> NSScreen? {
@@ -318,10 +328,17 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
 
     // MARK: - SwitcherRowViewDelegate
 
+    /// The view is told about every real hover (the Icons layout titles the
+    /// hovered window); it selects only with "Change selection on mouse hover".
     func rowHovered(displayIndex: Int) {
-        guard hoverGate.accept(pointer: NSEvent.mouseLocation),
-              Settings.shared.selectOnHover, session?.select(rowIndex: displayIndex) == true else { return }
+        guard hoverGate.accept(pointer: NSEvent.mouseLocation) else { return }
+        contentView.setHovered(rowIndex: displayIndex)
+        guard Settings.shared.selectOnHover, session?.select(rowIndex: displayIndex) == true else { return }
         updateSelectionHighlight()
+    }
+
+    func rowUnhovered(displayIndex: Int) {
+        contentView.setHovered(rowIndex: nil, ifHovering: displayIndex)
     }
 
     func rowClicked(displayIndex: Int) {

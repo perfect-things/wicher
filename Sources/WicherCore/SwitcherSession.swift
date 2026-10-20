@@ -123,6 +123,14 @@ struct SwitcherSession {
         return true
     }
 
+    /// Returns false when the query was already empty (nothing changed).
+    mutating func clearQuery() -> Bool {
+        guard !query.isEmpty else { return false }
+        query = ""
+        queryChanged()
+        return true
+    }
+
     private mutating func queryChanged() {
         rebuildRows()
         selectionPos = 0
