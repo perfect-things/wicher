@@ -119,7 +119,8 @@ final class SwitcherRowView: NSView {
             return glass
         }()
         glass.style = style == .clearGlass ? .clear : .regular
-        glass.tintColor = style == .tintedGlass ? NSColor.controlAccentColor.withAlphaComponent(0.4) : nil
+        glass.tintColor = style == .tintedGlass ? NSColor.controlAccentColor.withAlphaComponent(0.4)
+            : effectiveAppearance.isDark ? nil : HighlightStyle.lightRowTint
         glass.isHidden = false
     }
 

@@ -67,6 +67,18 @@ final class SwitcherListView: NSView {
         return glass
     }
 
+    /// Untinted glass over a white window is nearly white in Light mode, and
+    /// the row highlight barely shows on it. A gray tint gives the panel the
+    /// light-gray glass of the system ⌘Tab switcher. Dark mode is fine as is.
+    private func applyBackdropTint() {
+        backdrop.tintColor = effectiveAppearance.isDark ? nil : HighlightStyle.lightPanelTint
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyBackdropTint()
+    }
+
     required init?(coder: NSCoder) { preconditionFailure("not used") }
 
     private func build() {
@@ -76,6 +88,7 @@ final class SwitcherListView: NSView {
         addSubview(backdrop)
         content.translatesAutoresizingMaskIntoConstraints = false
         backdrop.contentView = content
+        applyBackdropTint()
 
         searchContainer.wantsLayer = true
         searchContainer.layer?.masksToBounds = true

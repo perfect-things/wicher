@@ -40,6 +40,15 @@ enum HighlightStyle: Int, CaseIterable {
 
     /// The styles drawn with a row-level `NSGlassEffectView`.
     var isGlass: Bool { self == .glass || self == .clearGlass || self == .tintedGlass }
+
+    /// Light mode only: the panel's glass tint, and the (darker) tint of a
+    /// Glass / Clear glass highlight on it — like the system ⌘Tab switcher.
+    static let lightPanelTint = NSColor(white: 0, alpha: 0.12)
+    static let lightRowTint = NSColor(white: 0, alpha: 0.16)
+}
+
+extension NSAppearance {
+    var isDark: Bool { bestMatch(from: [.aqua, .darkAqua]) == .darkAqua }
 }
 
 /// Applies the user's Light / Dark / System choice to the whole app.
