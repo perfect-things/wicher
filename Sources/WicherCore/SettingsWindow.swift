@@ -18,6 +18,10 @@ final class SettingsWindow: NSObject {
         model.refreshLoginItem()
         WindowActivator.activateSelf()
         window?.makeKeyAndOrderFront(nil)
+        // Start with nothing focused: a sidebar row left focused (the first
+        // one, or the last one Tabbed to) draws a second, dimmer highlight
+        // beside the selected pane. Tab enters at the selected row.
+        window?.makeFirstResponder(nil)
     }
 
     func build() {

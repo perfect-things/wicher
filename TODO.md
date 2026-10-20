@@ -1,6 +1,5 @@
 # BUGS
-- [ ] focus-ring in settings sidebar (get screenshot)
-- [ ]
+
 
 
 # TODO

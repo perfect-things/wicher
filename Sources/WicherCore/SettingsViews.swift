@@ -7,8 +7,15 @@ import SwiftUI
 /// Plain buttons rather than a selectable `List`: a List's selection is drawn
 /// in the accent color, which swallows the (accent-colored) icons. This draws
 /// a neutral highlight instead, like most apps' settings sidebars.
+///
+/// No focus ring: with keyboard navigation on, the first row took focus as
+/// the window opened and wore a blue ring. Keyboard focus is drawn as a
+/// fainter version of the selection highlight instead. Focus follows the
+/// selection: a click selects without focusing, and the first row takes focus
+/// whatever pane is shown, so otherwise a second, dimmer highlight lingered.
 struct SettingsSidebar: View {
     let model: SettingsModel
+    @FocusState private var focused: SettingsPane?
 
     var body: some View {
         ScrollView {
@@ -16,11 +23,21 @@ struct SettingsSidebar: View {
                 ForEach(SettingsPane.allCases) { pane in
                     Button { model.pane = pane } label: { row(pane) }
                         .buttonStyle(.plain)
+                        .focusEffectDisabled()
+                        .focused($focused, equals: pane)
                         .accessibilityAddTraits(pane == model.pane ? .isSelected : [])
                 }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
+        }
+        // Entering the sidebar lands on the selected row, like a List;
+        // Tab between rows still moves focus (and its highlight) freely.
+        .onChange(of: focused) { old, new in
+            if old == nil, let new, new != model.pane { focused = model.pane }
+        }
+        .onChange(of: model.pane) {
+            if focused != nil { focused = model.pane }
         }
     }
 
@@ -37,7 +54,7 @@ struct SettingsSidebar: View {
         .padding(.vertical, 8)
         .padding(.horizontal, 10)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(pane == model.pane ? Color.primary.opacity(0.1) : .clear))
+            .fill(Color.primary.opacity(pane == model.pane ? 0.1 : focused == pane ? 0.05 : 0)))
         .contentShape(Rectangle())
     }
 }
