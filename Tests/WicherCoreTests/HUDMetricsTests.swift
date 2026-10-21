@@ -8,7 +8,7 @@ final class HUDMetricsTests: XCTestCase {
         XCTAssertEqual(m.titleSize, 10)
         XCTAssertEqual(m.rowHeight, 16)        // max(16, 10) + 0 padding
         XCTAssertEqual(m.appSize, 10)          // floor of 10
-        XCTAssertEqual(m.headerHeight, 20)     // floor of 20
+        XCTAssertEqual(m.separatorHeight, 9)   // floor of 9
         XCTAssertEqual(m.panelWidth, 536)      // 440 + 16 * 6
         XCTAssertEqual(m.appColumnWidth, 134)  // 25% of 536
     }
@@ -19,7 +19,7 @@ final class HUDMetricsTests: XCTestCase {
         XCTAssertEqual(m.titleSize, 32)
         XCTAssertEqual(m.rowHeight, 56 + 40 * 2)
         XCTAssertEqual(m.appSize, 26)          // 32 * 0.82, rounded
-        XCTAssertEqual(m.headerHeight, 48)     // 32 * 1.5
+        XCTAssertEqual(m.separatorHeight, 24)  // 32 * 0.75
         XCTAssertEqual(m.panelWidth, 776)      // 440 + 56 * 6
         XCTAssertEqual(m.appColumnWidth, 194)  // 25% of 776
     }

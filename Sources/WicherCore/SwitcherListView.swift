@@ -32,9 +32,10 @@ final class SwitcherListView: NSView, SwitcherContentView {
     private var metrics = HUDMetrics.make(iconSize: 32, textSize: 16, rowPadding: 7)
     /// From the settings at `beginSession`; applied by the next `render`.
     private var sessionMetrics = HUDMetrics.make(iconSize: 32, textSize: 16, rowPadding: 7)
-    /// Reusable views. Index i is the i-th item (or header) of the current render.
+    /// Reusable views. Index i is the i-th item of the current render.
     private var itemPool: [SwitcherRowView] = []
-    private var headerPool: [SwitcherHeaderView] = []
+    /// Between the main group and the bottom one; there is at most one.
+    private let separator = HUDSeparatorView()
     private var rowViews: [Int: SwitcherRowView] = [:] // row index -> view, current render only
 
     /// Padding around the list inside the scroll view — equal on all sides,
@@ -72,6 +73,8 @@ final class SwitcherListView: NSView, SwitcherContentView {
         emptyLabel.textColor = .secondaryLabelColor
         emptyLabel.isHidden = true
         document.addSubview(emptyLabel)
+        separator.isHidden = true
+        document.addSubview(separator)
 
         content.addSubview(searchBar)
         content.addSubview(scrollView)
@@ -120,7 +123,7 @@ final class SwitcherListView: NSView, SwitcherContentView {
         let text = SurfaceView.textAppearance(selected: false)
         searchBar.setTextAppearance(text)
         emptyLabel.appearance = text
-        headerPool.forEach { $0.appearance = text }
+        separator.appearance = text
     }
 
     func setQuery(_ query: String) {
@@ -144,36 +147,27 @@ final class SwitcherListView: NSView, SwitcherContentView {
 
     func setHovered(rowIndex: Int?) {}
     func setHovered(rowIndex: Int?, ifHovering: Int) {}
+    /// One column: Up/Down move like Left/Right.
+    func rowIndex(from rowIndex: Int, movingRows step: Int) -> Int? { nil }
 
     /// Shows `rows`, reusing row views from the previous render.
     func render(_ rows: [DisplayRow], metrics: HUDMetrics) {
         if metrics != self.metrics {
             // Fonts and column widths are baked into the views; start over.
             itemPool.forEach { $0.removeFromSuperview() }
-            headerPool.forEach { $0.removeFromSuperview() }
             itemPool.removeAll()
-            headerPool.removeAll()
         }
         self.rows = rows
         self.metrics = metrics
         rowViews.removeAll()
 
         var items = 0
-        var headers = 0
+        separator.isHidden = true
         for (rowIndex, row) in rows.enumerated() {
             switch row {
-            case let .header(title):
-                if headers == headerPool.count {
-                    let header = SwitcherHeaderView(metrics: metrics)
-                    header.appearance = SurfaceView.textAppearance(selected: false)
-                    headerPool.append(header)
-                    document.addSubview(header)
-                }
-                let header = headerPool[headers]
-                header.title = title
-                header.isHidden = false
-                headers += 1
-            case let .item(info, ranges):
+            case .separator:
+                separator.isHidden = false
+            case let .item(info, ranges, note):
                 if items == itemPool.count {
                     let view = SwitcherRowView(metrics: metrics)
                     view.delegate = rowDelegate
@@ -185,14 +179,14 @@ final class SwitcherListView: NSView, SwitcherContentView {
                 view.isSelected = false
                 view.configure(icon: info.appIcon,
                                title: attributedTitle(info.displayTitle, ranges: ranges),
-                               appName: info.appName)
+                               appName: info.appName,
+                               note: note)
                 view.isHidden = false
                 rowViews[rowIndex] = view
                 items += 1
             }
         }
         itemPool[items...].forEach { $0.isHidden = true }
-        headerPool[headers...].forEach { $0.isHidden = true }
         updateEmptyLabel()
         layoutRows()
     }
@@ -218,13 +212,15 @@ final class SwitcherListView: NSView, SwitcherContentView {
         }
         var y = insets.top
         var items = 0
-        var headers = 0
         for row in rows {
             switch row {
-            case .header:
-                headerPool[headers].frame = NSRect(x: insets.left, y: y, width: rowWidth, height: metrics.headerHeight)
-                headers += 1
-                y += metrics.headerHeight
+            case .separator:
+                // A hairline in the middle of the gap, as wide as the rows' content.
+                let x = insets.left + HUDMetrics.rowLeadingInset
+                separator.frame = NSRect(x: x, y: y + ((metrics.separatorHeight - 1) / 2).rounded(),
+                                         width: max(0, rowWidth - HUDMetrics.rowLeadingInset - HUDMetrics.rowTrailingInset),
+                                         height: 1)
+                y += metrics.separatorHeight
             case .item:
                 itemPool[items].frame = NSRect(x: insets.left, y: y, width: rowWidth, height: metrics.rowHeight)
                 items += 1
@@ -279,7 +275,7 @@ final class SwitcherListView: NSView, SwitcherContentView {
         var contentHeight: CGFloat = listInsets.top + listInsets.bottom
         for row in rows {
             switch row {
-            case .header: contentHeight += metrics.headerHeight
+            case .separator: contentHeight += metrics.separatorHeight
             case .item: contentHeight += metrics.rowHeight
             }
         }

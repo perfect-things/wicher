@@ -13,10 +13,20 @@ final class SwitcherListViewTests: XCTestCase {
         return view
     }
 
-    private func rows(_ count: Int, header: String? = nil) -> [DisplayRow] {
-        var rows: [DisplayRow] = header.map { [.header($0)] } ?? []
-        rows += (0..<count).map { .item(window("Window \($0)", app: "App \($0)"), []) }
+    /// `count` main-group rows, then — behind a separator — `bottom` rows noted "Minimized".
+    private func rows(_ count: Int, bottom: Int = 0) -> [DisplayRow] {
+        var rows: [DisplayRow] = (0..<count).map { .item(window("Window \($0)", app: "App \($0)"), []) }
+        if count > 0 && bottom > 0 { rows.append(.separator) }
+        rows += (0..<bottom).map { .item(window("Old \($0)", app: "App", minimized: true), [], note: "Minimized") }
         return rows
+    }
+
+    private func separator(_ view: SwitcherListView) -> HUDSeparatorView? {
+        documentSubviews(view).compactMap { $0 as? HUDSeparatorView }.first
+    }
+
+    private func labels(_ row: NSView) -> [NSTextField] {
+        row.subviews.compactMap { $0 as? NSTextField }.filter { !$0.isHidden }
     }
 
     private func scrollView(in view: NSView) -> NSScrollView? {
@@ -32,7 +42,7 @@ final class SwitcherListViewTests: XCTestCase {
     private func rowSubviews(_ view: SwitcherListView) -> [NSView] {
         let scroll = scrollView(in: view)!
         return scroll.documentView!.subviews
-            .filter { $0 is SwitcherRowView || $0 is SwitcherHeaderView }
+            .filter { $0 is SwitcherRowView }
             .sorted { $0.frame.minY < $1.frame.minY }
     }
 
@@ -42,15 +52,49 @@ final class SwitcherListViewTests: XCTestCase {
 
     func testRowsAreStackedTopToBottomAtFixedHeights() {
         let view = makeView()
-        view.render(rows(3, header: "Minimized"), metrics: metrics)
+        view.render(rows(1, bottom: 2), metrics: metrics)
         view.layoutSubtreeIfNeeded()
         let frames = rowFrames(view)
         let top = metrics.listInset
-        XCTAssertEqual(frames.map(\.minY), [top, top + metrics.headerHeight,
-                                            top + metrics.headerHeight + metrics.rowHeight,
-                                            top + metrics.headerHeight + 2 * metrics.rowHeight])
-        XCTAssertEqual(frames.map(\.height), [metrics.headerHeight] + Array(repeating: metrics.rowHeight, count: 3))
+        XCTAssertEqual(frames.map(\.minY), [top,
+                                            top + metrics.rowHeight + metrics.separatorHeight,
+                                            top + 2 * metrics.rowHeight + metrics.separatorHeight])
+        XCTAssertEqual(frames.map(\.height), Array(repeating: metrics.rowHeight, count: 3))
         XCTAssertTrue(frames.allSatisfy { $0.minX == metrics.listInset && $0.width == metrics.panelWidth - 2 * metrics.listInset })
+
+        let line = try! XCTUnwrap(separator(view))
+        XCTAssertFalse(line.isHidden)
+        XCTAssertEqual(line.frame.height, 1)
+        XCTAssertGreaterThan(line.frame.minY, frames[0].maxY)
+        XCTAssertLessThan(line.frame.maxY, frames[1].minY)
+        XCTAssertEqual(view.preferredHeight(maxListHeight: 1000),
+                       2 * metrics.listInset + 3 * metrics.rowHeight + metrics.separatorHeight)
+    }
+
+    func testNoSeparatorWithoutOne() {
+        let view = makeView()
+        view.render(rows(1, bottom: 2), metrics: metrics)
+        view.render(rows(3), metrics: metrics)
+        XCTAssertEqual(separator(view)?.isHidden, true)
+    }
+
+    /// Bottom rows end in a faint note; a pooled row reused for the main group loses it.
+    func testBottomRowsShowTheirNote() throws {
+        let view = makeView()
+        view.render(rows(1, bottom: 1), metrics: metrics)
+        view.layoutSubtreeIfNeeded()
+        let rows2 = rowSubviews(view)
+        rows2.forEach { $0.layoutSubtreeIfNeeded() }
+        XCTAssertFalse(labels(rows2[0]).contains { $0.stringValue == "Minimized" })
+        let bottomRow = rows2[1]
+        let note = try XCTUnwrap(labels(bottomRow).first { $0.stringValue == "Minimized" })
+        let title = try XCTUnwrap(labels(bottomRow).first { $0.stringValue == "Old 0" })
+        XCTAssertEqual(note.frame.maxX, bottomRow.bounds.width - HUDMetrics.rowTrailingInset)
+        XCTAssertLessThanOrEqual(title.frame.maxX, note.frame.minX - HUDMetrics.titleToNote)
+
+        view.render(rows(2), metrics: metrics)
+        view.layoutSubtreeIfNeeded()
+        XCTAssertFalse(rowSubviews(view).flatMap(labels).contains { $0.stringValue == "Minimized" })
     }
 
     func testViewsAreReusedAcrossRenders() {
@@ -96,7 +140,7 @@ final class SwitcherListViewTests: XCTestCase {
         // Snapshot for eyeballing, when asked for.
         if let dir = ProcessInfo.processInfo.environment["WICHER_SNAPSHOT_DIR"] {
             view.appearance = NSAppearance(named: .aqua)   // dark text on the (unrendered) glass
-            view.render(rows(4, header: "Minimized"), metrics: metrics)
+            view.render(rows(3, bottom: 2), metrics: metrics)
             view.layoutSubtreeIfNeeded()
             if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
                 view.cacheDisplay(in: view.bounds, to: rep)

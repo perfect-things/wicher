@@ -1,9 +1,12 @@
 import Foundation
 
-/// One rendered row in the list.
+/// One rendered row in the list (or icon in the Icons layout).
 enum DisplayRow {
-    case header(String)
-    case item(WindowInfo, [NSRange])
+    /// Between the main group and the bottom one, when both have entries.
+    case separator
+    /// `ranges`: what a search matched in the title. `note`: why the window
+    /// is in the bottom group ("Minimized", …; see `WindowGroups`).
+    case item(WindowInfo, [NSRange], note: String? = nil)
 }
 
 /// The model of one switcher session: which rows are on offer for the current
@@ -46,7 +49,7 @@ struct SwitcherSession {
     }
 
     var selectedWindow: WindowInfo? {
-        guard let index = selectedRowIndex, case let .item(info, _) = rows[index] else { return nil }
+        guard let index = selectedRowIndex, case let .item(info, _, _) = rows[index] else { return nil }
         return info
     }
 
@@ -62,7 +65,7 @@ struct SwitcherSession {
         }
     }
 
-    /// Selects the item at `rowIndex`. Returns false for a header or an
+    /// Selects the item at `rowIndex`. Returns false for a separator or an
     /// out-of-range index, leaving the selection unchanged.
     @discardableResult
     mutating func select(rowIndex: Int) -> Bool {
@@ -97,18 +100,19 @@ struct SwitcherSession {
         return true
     }
 
-    /// What the user can see: headers, and each item's identity and label.
+    /// What the user can see: the separator, and each item's identity and labels.
     private var signature: [String] {
         rows.map { row in
             switch row {
-            case let .header(title): return "h:\(title)"
-            case let .item(info, _): return "i:\(info.key):\(info.displayTitle):\(info.appName)"
+            case .separator: return "-"
+            case let .item(info, _, note):
+                return "i:\(info.key):\(info.displayTitle):\(info.appName):\(note ?? "")"
             }
         }
     }
 
     private func key(atRow index: Int) -> WindowKey? {
-        if case let .item(info, _) = rows[index] { return info.key }
+        if case let .item(info, _, _) = rows[index] { return info.key }
         return nil
     }
 
@@ -145,16 +149,16 @@ struct SwitcherSession {
         rows.removeAll()
 
         if query.isEmpty {
-            let sections = WindowGrouping.sections(for: profile,
-                                                   enumeration: enumeration,
-                                                   activeAppPID: activeAppPID,
-                                                   display: display)
-            for section in sections {
-                if let title = section.title { rows.append(.header(title)) }
-                for info in section.items { rows.append(.item(info, [])) }
-            }
+            let groups = WindowGrouping.groups(for: profile,
+                                               enumeration: enumeration,
+                                               activeAppPID: activeAppPID,
+                                               display: display)
+            for info in groups.main { rows.append(.item(info, [])) }
+            if !groups.main.isEmpty && !groups.bottom.isEmpty { rows.append(.separator) }
+            for (info, note) in groups.bottom { rows.append(.item(info, [], note: note)) }
         } else {
-            // Search mode: a single flat, scored list (no section headers).
+            // Search mode: a single flat, scored list (no separator); bottom
+            // windows keep their notes.
             let pool = WindowGrouping.searchPool(for: profile, enumeration: enumeration,
                                                  activeAppPID: activeAppPID, display: display)
             var scored: [(info: WindowInfo, ranges: [NSRange], score: Int)] = []
@@ -166,7 +170,11 @@ struct SwitcherSession {
                 }
             }
             scored.sort { $0.score > $1.score }
-            for s in scored { rows.append(.item(s.info, s.ranges)) }
+            for s in scored {
+                let note = WindowGrouping.note(for: s.info, profile: profile, enumeration: enumeration,
+                                               display: display)
+                rows.append(.item(s.info, s.ranges, note: note))
+            }
         }
 
         selectableIndexes = rows.indices.filter {

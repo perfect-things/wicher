@@ -102,8 +102,9 @@ database. Flow of one switch:
      (grouped, or fuzzy-scored when searching) and the selection. No views or timers.
    - A **`SwitcherContentView`**, picked per session from `SwitcherProfile.layout`:
      **`SwitcherListView`** (List: backdrop, search bar, rows, selection highlight) or
-     **`SwitcherIconGridView`** (Icons: one row of icons like ⌘Tab, the hovered — else
-     selected — window's title under it, middle-truncated). Each reads its own sizes
+     **`SwitcherIconGridView`** (Icons: a row of icons like ⌘Tab — plus a second row for the
+     bottom group, below a separator — and the hovered — else selected — window's title
+     under it, middle-truncated; centered in the panel with two rows). Each reads its own sizes
      from `Settings` in `beginSession` and reports the panel window's whole size
      (`preferredWindowSize`; the Icons width follows the icon count), so the controller
      re-sizes and re-centers on every render. Row/cell/header views are **pooled and
@@ -119,11 +120,14 @@ database. Flow of one switch:
    **Copy Diagnostics** dump (`diagnosticsReport()`, Settings → General). The decision of which rows
    exist is **`WindowAssembly.assemble`** — pure, tested; put classification changes
    there, with a test.
-5. **`WindowGrouping`** — pure function: `(profile, Enumeration, activePID, DisplayLayout?) → [WindowSection]`.
+5. **`WindowGrouping`** — pure function: `(profile, Enumeration, activePID, DisplayLayout?) → WindowGroups` (main + the merged bottom group).
    Put filtering/ordering policy here, not in the controller; it is the one piece that is
    trivially reasonable about in isolation. Each window falls in one category — minimized,
    else hidden app, else other Space (`!onCurrentSpace`), else other display — and each
-   category has a per-profile `Placement` (show / at bottom / hide). "Other display" means
+   category has a per-profile `Placement` (show / at bottom / hide). Every "at bottom"
+   category is merged into one bottom group (`WindowGroups.bottom`), each entry with a note
+   saying why (shown faint at the right of a List row). Rows get a `.separator` between the
+   groups only when both have entries; there are no section headers. "Other display" means
    most of its CGWindowList bounds (`Enumeration.windowFrames`, refreshed by `reconcile`)
    lie on a display other than the one the session opened on (`DisplayLayout`, in CG
    global coordinates — `CGDisplayBounds`, no `NSScreen` flip). A display's current Space
@@ -267,8 +271,12 @@ sleep); a refresh requested during a scan re-runs afterwards rather than being d
 - A tap+release inside `showDelayMs` switches to the previous window without ever drawing
   the panel — `SwitcherSession` preselects index 1 (forward) for that reason.
 - Discrete presses wrap around the list; auto-repeat while held clamps at the ends.
+- Tab/Left/Right walk both groups in order. In Icons with two rows, Up/Down jump to the
+  nearest icon in the other row (`IconGridLayout.item(_:movedRows:)`) and do nothing at the
+  edge; otherwise they move like Left/Right.
 - Hover selects only after the pointer really moves (`HoverGate`): `mouseEntered` also
   fires when the panel opens under a still pointer or a live refresh moves rows beneath it.
 - Esc clears a non-empty search; with none, it closes the panel.
-- Typing switches to a flat, `FuzzyMatcher`-scored list with no section headers; matched
+- Typing switches to a flat, `FuzzyMatcher`-scored list with no separator (bottom-group
+  windows keep their notes); matched
 ranges are colored (`NSColor.searchMatch`, pastel amber). An app-name-only match is scored 5 lower than a title match.

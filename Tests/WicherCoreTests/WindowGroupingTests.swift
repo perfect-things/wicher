@@ -21,8 +21,15 @@ final class WindowGroupingTests: XCTestCase {
                              4: rightDisplayFrame, 5: rightDisplayFrame])
     }
 
-    private func shape(_ sections: [WindowSection]) -> [String] {
-        sections.map { s in "\(s.title ?? "-"): " + s.items.map(\.displayTitle).joined(separator: ",") }
+    /// "main: a,b" then "bottom: c (Note),…", each only when non-empty.
+    private func shape(_ groups: WindowGroups) -> [String] {
+        var out: [String] = []
+        if !groups.main.isEmpty { out.append("main: " + groups.main.map(\.displayTitle).joined(separator: ",")) }
+        if !groups.bottom.isEmpty {
+            out.append("bottom: " + groups.bottom.map { "\($0.window.displayTitle) (\($0.note))" }
+                .joined(separator: ","))
+        }
+        return out
     }
 
     /// Every scope × placement combination, checked against an expectation
@@ -33,8 +40,8 @@ final class WindowGroupingTests: XCTestCase {
             for dispP in all { for spaceP in all { for minP in all { for hidP in all { for appP in all {
                 let p = profile(scope: scope, otherDisplays: dispP, otherSpaces: spaceP,
                                 minimized: minP, hidden: hidP, apps: appP)
-                let got = WindowGrouping.sections(for: p, enumeration: fixture, activeAppPID: 1,
-                                                  display: twoDisplays)
+                let got = WindowGrouping.groups(for: p, enumeration: fixture, activeAppPID: 1,
+                                                display: twoDisplays)
                 XCTAssertEqual(shape(got), expected(scope, [dispP, spaceP, minP, hidP, appP]),
                                "scope=\(scope) disp=\(dispP) space=\(spaceP) min=\(minP) hid=\(hidP) apps=\(appP)")
             } } } } }
@@ -49,24 +56,25 @@ final class WindowGroupingTests: XCTestCase {
             normal = ["a1"]
             categories = [["a4"], ["a2"], ["a3"], [], ["A"]]
         }
-        let titles = ["Other Displays", "Other Spaces", "Minimized", "Hidden", "Apps"]
+        let notes = ["Other Display", "Other Space", "Minimized", "Hidden", "No Windows"]
 
         var main = normal
         var bottom: [String] = []
-        for (i, items) in categories.enumerated() where !items.isEmpty {
+        for (i, items) in categories.enumerated() {
             switch placements[i] {
             case .hide: break
             case .show: main += items
-            case .showAtBottom: bottom.append("\(titles[i]): " + items.joined(separator: ","))
+            case .showAtBottom: bottom += items.map { "\($0) (\(notes[i]))" }
             }
         }
-        return (main.isEmpty ? [] : ["-: " + main.joined(separator: ",")]) + bottom
+        return (main.isEmpty ? [] : ["main: " + main.joined(separator: ",")])
+            + (bottom.isEmpty ? [] : ["bottom: " + bottom.joined(separator: ",")])
     }
 
     func testWithoutDisplayLayoutNothingIsOnAnotherDisplay() {
         let p = profile(otherDisplays: .hide, otherSpaces: .hide, minimized: .hide, hidden: .hide, apps: .hide)
-        let got = WindowGrouping.sections(for: p, enumeration: fixture, activeAppPID: nil)
-        XCTAssertEqual(shape(got), ["-: a1,b1,a4,b5"])
+        let got = WindowGrouping.groups(for: p, enumeration: fixture, activeAppPID: nil)
+        XCTAssertEqual(shape(got), ["main: a1,b1,a4,b5"])
     }
 
     func testDisplayLayoutPicksTheDisplayWithMostOfTheWindow() {
@@ -80,17 +88,29 @@ final class WindowGroupingTests: XCTestCase {
 
     func testActiveAppScopeWithoutActivePIDKeepsEverything() {
         let p = profile(scope: .activeApp, minimized: .show, hidden: .show, apps: .show)
-        let got = WindowGrouping.sections(for: p, enumeration: fixture, activeAppPID: nil)
-        XCTAssertEqual(shape(got), ["-: a1,b1,a4,b5,a2,a3,b3,b2,b4,A,C"])
+        let got = WindowGrouping.groups(for: p, enumeration: fixture, activeAppPID: nil)
+        XCTAssertEqual(shape(got), ["main: a1,b1,a4,b5,a2,a3,b3,b2,b4,A,C"])
     }
 
-    func testEmptyMainSectionIsDropped() {
+    func testOnlyABottomGroup() {
         let e = enumeration([window("m", minimized: true)])
-        let got = WindowGrouping.sections(for: profile(), enumeration: e, activeAppPID: nil)
-        XCTAssertEqual(shape(got), ["Minimized: m"])
+        let got = WindowGrouping.groups(for: profile(), enumeration: e, activeAppPID: nil)
+        XCTAssertEqual(shape(got), ["bottom: m (Minimized)"])
     }
 
-    func testEmptyEnumerationYieldsNoSections() {
-        XCTAssertTrue(WindowGrouping.sections(for: profile(), enumeration: .empty, activeAppPID: 1).isEmpty)
+    func testEmptyEnumerationYieldsNoGroups() {
+        XCTAssertTrue(WindowGrouping.groups(for: profile(), enumeration: .empty, activeAppPID: 1).isEmpty)
+    }
+
+    func testNoteFollowsThePlacement() {
+        let p = profile(otherDisplays: .showAtBottom, minimized: .show, apps: .showAtBottom)
+        func note(_ w: WindowInfo) -> String? {
+            WindowGrouping.note(for: w, profile: p, enumeration: fixture, display: twoDisplays)
+        }
+        XCTAssertNil(note(a1))
+        XCTAssertNil(note(a3), "minimized is shown in the main group")
+        XCTAssertEqual(note(a4), "Other Display")
+        XCTAssertEqual(note(b2), "Hidden")
+        XCTAssertEqual(note(appA), "No Windows")
     }
 }

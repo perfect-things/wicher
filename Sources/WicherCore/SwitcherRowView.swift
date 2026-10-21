@@ -9,8 +9,10 @@ protocol SwitcherRowViewDelegate: AnyObject {
 }
 
 /// A single list row laid out like a classic window switcher:
-/// `[ app name — right aligned ] [ icon ] [ window title … ]`, or just
-/// `[ icon ] [ window title … ]` when the metrics have no app column.
+/// `[ app name — right aligned ] [ icon ] [ window title … ] [ note ]`, or
+/// just `[ icon ] [ window title … ] [ note ]` when the metrics have no app
+/// column. The note — faint, why a window is in the bottom group — is there
+/// only for those rows.
 /// All colors are semantic, so the row adapts to Light/Dark automatically.
 ///
 /// Reused across renders (see `SwitcherListView`), so `displayIndex` and the
@@ -24,6 +26,7 @@ final class SwitcherRowView: NSView {
     private let iconView = NSImageView()
     private let titleField = NSTextField(labelWithString: "")
     private let appField = NSTextField(labelWithString: "")
+    private let noteField = NSTextField(labelWithString: "")
     /// The selection highlight, behind the content; made on first selection.
     private var highlightView: SurfaceView?
     /// Set on mouse-down inside this row, so a drag that merely *ends* over
@@ -47,8 +50,13 @@ final class SwitcherRowView: NSView {
         appField.alignment = .right
         appField.textColor = .secondaryLabelColor
 
+        noteField.lineBreakMode = .byTruncatingTail
+        noteField.font = .systemFont(ofSize: metrics.appSize, weight: .regular)
+        noteField.alignment = .right
+        noteField.textColor = .tertiaryLabelColor
+
         appField.isHidden = metrics.appColumnWidth == 0
-        for v in [appField, iconView, titleField] { addSubview(v) }
+        for v in [appField, iconView, titleField, noteField] { addSubview(v) }
 
         // `.inVisibleRect` keeps the hover region matched to what is actually
         // visible as the list scrolls; AppKit maintains the rect for us.
@@ -61,10 +69,13 @@ final class SwitcherRowView: NSView {
 
     required init?(coder: NSCoder) { preconditionFailure("not used") }
 
-    func configure(icon: NSImage?, title: NSAttributedString, appName: String) {
+    func configure(icon: NSImage?, title: NSAttributedString, appName: String, note: String? = nil) {
         iconView.image = icon
         titleField.attributedStringValue = title
         appField.stringValue = appName
+        noteField.stringValue = note ?? ""   // pooled: a main-group row must lose the last one's
+        noteField.isHidden = note == nil
+        needsLayout = true
         applySelectionAppearance()   // the background may have changed since the last session
     }
 
@@ -82,8 +93,17 @@ final class SwitcherRowView: NSView {
         }
         iconView.frame = centered(iconX, metrics.iconSize, metrics.iconSize)
         let titleX = iconView.frame.maxX + HUDMetrics.iconToTitle
+        var titleEnd = bounds.width - HUDMetrics.rowTrailingInset
+        if !noteField.isHidden {
+            // The whole note's size: a truncating field's intrinsic width
+            // follows its current frame.
+            let size = noteField.cell?.cellSize ?? noteField.intrinsicContentSize
+            let width = min(ceil(size.width), (bounds.width * HUDMetrics.maxNoteFraction).rounded(.down))
+            noteField.frame = centered(titleEnd - width, width, ceil(size.height))
+            titleEnd = noteField.frame.minX - HUDMetrics.titleToNote
+        }
         let titleHeight = ceil(titleField.intrinsicContentSize.height)
-        titleField.frame = centered(titleX, bounds.width - HUDMetrics.rowTrailingInset - titleX, titleHeight)
+        titleField.frame = centered(titleX, titleEnd - titleX, titleHeight)
     }
 
     /// Settings are read here, when the selection changes, so a change
@@ -96,7 +116,7 @@ final class SwitcherRowView: NSView {
         }
         highlightView?.isHidden = !isSelected
         let text = SurfaceView.textAppearance(selected: isSelected)
-        for field in [titleField, appField] { field.appearance = text }
+        for field in [titleField, appField, noteField] { field.appearance = text }
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -112,31 +132,5 @@ final class SwitcherRowView: NSView {
         defer { pressed = false }
         guard pressed, bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
         delegate?.rowClicked(displayIndex: displayIndex)
-    }
-}
-
-/// A dim, centered section header ("Minimized", "Apps", …). Not selectable.
-final class SwitcherHeaderView: NSView {
-    private let label = NSTextField(labelWithString: "")
-
-    var title: String {
-        get { label.stringValue }
-        set { label.stringValue = newValue; needsLayout = true }
-    }
-
-    init(metrics: HUDMetrics) {
-        super.init(frame: .zero)
-        label.font = .systemFont(ofSize: metrics.appSize, weight: .semibold)
-        label.textColor = .tertiaryLabelColor
-        label.alignment = .center
-        addSubview(label)
-    }
-
-    required init?(coder: NSCoder) { preconditionFailure("not used") }
-
-    override func layout() {
-        super.layout()
-        let height = ceil(label.intrinsicContentSize.height)
-        label.frame = NSRect(x: 0, y: ((bounds.height - height) / 2).rounded(), width: bounds.width, height: height)
     }
 }

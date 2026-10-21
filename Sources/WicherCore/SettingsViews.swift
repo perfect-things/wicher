@@ -269,7 +269,7 @@ private struct ProfileRows: View {
     }
 }
 
-/// Where each category of window goes: in the list, in a section at the
+/// Where each category of window goes: in the list, in the group at the
 /// bottom, or nowhere.
 private struct PlacementRows: View {
     let model: SettingsModel

@@ -6,13 +6,14 @@ private final class FlippedStage: NSView {
 }
 
 /// The Icons layout's whole content: the rounded background, the search bar,
-/// one row of window icons, and the title of the hovered — else the selected —
-/// window underneath. Geometry comes from `IconGridLayout`; cells are pooled
-/// and placed by frame, like the List's rows.
+/// a row of window icons — plus a second one for the bottom group, below a
+/// separator — and the title of the hovered — else the selected — window
+/// underneath. Geometry comes from `IconGridLayout`; cells are pooled and
+/// placed by frame, like the List's rows.
 ///
 /// One icon per window: an app with three windows shows its icon three
-/// times, and the title tells them apart. Sections (Minimized, Hidden, Apps)
-/// keep their order but have no headers here.
+/// times, and the title tells them apart. The bottom group's notes are not
+/// shown here.
 final class SwitcherIconGridView: NSView, SwitcherContentView {
     weak var rowDelegate: SwitcherRowViewDelegate?
 
@@ -20,6 +21,7 @@ final class SwitcherIconGridView: NSView, SwitcherContentView {
     private let searchBar = HUDSearchBar()
     private let stage = FlippedStage()
     private let titleField = NSTextField(labelWithString: "")
+    private let separator = HUDSeparatorView()
     /// Shown in place of the icons when there are none.
     private let emptyLabel = NSTextField(labelWithString: "")
 
@@ -60,6 +62,8 @@ final class SwitcherIconGridView: NSView, SwitcherContentView {
         titleField.alignment = .center
         titleField.cell?.usesSingleLineMode = true
         stage.addSubview(titleField)
+        separator.isHidden = true
+        stage.addSubview(separator)
 
         emptyLabel.alignment = .center
         emptyLabel.textColor = .secondaryLabelColor
@@ -108,6 +112,7 @@ final class SwitcherIconGridView: NSView, SwitcherContentView {
         searchBar.setTextAppearance(text)
         titleField.appearance = text
         emptyLabel.appearance = text
+        separator.appearance = text
     }
 
     func setQuery(_ query: String) {
@@ -131,8 +136,13 @@ final class SwitcherIconGridView: NSView, SwitcherContentView {
             if case .item = rows[$0] { return true }
             return false
         }
+        // One row of icons per group: a separator starts the next.
+        var rowCounts = [0]
+        for row in rows {
+            if case .separator = row { rowCounts.append(0) } else { rowCounts[rowCounts.count - 1] += 1 }
+        }
         layoutInfo = IconGridLayout.make(iconSize: iconSize, padding: padding, textSize: textSize, spacing: spacing,
-                                         itemCount: itemRows.count, maxPanelWidth: maxPanelWidth)
+                                         rowCounts: rowCounts, maxPanelWidth: maxPanelWidth)
         backdrop.cornerRadius = layoutInfo.panelCornerRadius
         // The search text sits in the top padding the way the title sits in
         // the bottom one: same size, mirrored, so the panel doesn't grow.
@@ -148,7 +158,7 @@ final class SwitcherIconGridView: NSView, SwitcherContentView {
             stage.addSubview(cell, positioned: .below, relativeTo: titleField)
         }
         for (i, rowIndex) in itemRows.enumerated() {
-            guard case let .item(info, _) = rows[rowIndex] else { continue }
+            guard case let .item(info, _, _) = rows[rowIndex] else { continue }
             let cell = cellPool[i]
             cell.displayIndex = rowIndex
             cell.isSelected = false
@@ -159,6 +169,8 @@ final class SwitcherIconGridView: NSView, SwitcherContentView {
             cell.isHidden = false
         }
         cellPool[itemRows.count...].forEach { $0.isHidden = true }
+        separator.frame = layoutInfo.separatorFrame ?? .zero
+        separator.isHidden = layoutInfo.separatorFrame == nil
 
         titleField.font = .systemFont(ofSize: layoutInfo.titleSize, weight: .regular)
         updateEmptyLabel()
@@ -199,13 +211,19 @@ final class SwitcherIconGridView: NSView, SwitcherContentView {
         layoutInfo.windowSize
     }
 
+    func rowIndex(from rowIndex: Int, movingRows step: Int) -> Int? {
+        guard let item = itemRows.firstIndex(of: rowIndex),
+              let target = layoutInfo.item(item, movedRows: step) else { return nil }
+        return itemRows[target]
+    }
+
     // MARK: - Title
 
     /// The title of the hovered icon, else the selected one's; placed under
     /// its icon, inside the panel's edges, truncated in the middle.
     private func updateTitle() {
         guard let rowIndex = hoveredRow ?? selectedRow, rows.indices.contains(rowIndex),
-              case let .item(info, ranges) = rows[rowIndex],
+              case let .item(info, ranges, _) = rows[rowIndex],
               let item = itemRows.firstIndex(of: rowIndex) else {
             titleField.isHidden = true
             return

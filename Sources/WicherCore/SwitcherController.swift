@@ -272,10 +272,12 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
             commit()
         case kVK_Tab:
             advance(by: mods.contains(.shift) ? -1 : 1)
-        case kVK_DownArrow, kVK_RightArrow:
+        case kVK_RightArrow:
             advance(by: 1)
-        case kVK_UpArrow, kVK_LeftArrow:
+        case kVK_LeftArrow:
             advance(by: -1)
+        case kVK_DownArrow, kVK_UpArrow:
+            moveRows(by: Int(event.keyCode) == kVK_DownArrow ? 1 : -1)
         case kVK_Delete:
             if session?.deleteBackward() == true { queryChanged() }
         default:
@@ -304,6 +306,19 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
 
     private func advance(by step: Int, wrap: Bool = true) {
         session?.advance(by: step, wrap: wrap)
+        if panelShown { updateSelectionHighlight() }
+    }
+
+    /// Up/Down: to the nearest icon in the other row of the Icons layout;
+    /// elsewhere, like Right/Left.
+    private func moveRows(by step: Int) {
+        guard let session, let current = session.selectedRowIndex,
+              let target = contentView.rowIndex(from: current, movingRows: step) else {
+            advance(by: step)
+            return
+        }
+        guard target != current else { return }
+        self.session?.select(rowIndex: target)
         if panelShown { updateSelectionHighlight() }
     }
 

@@ -26,6 +26,30 @@ protocol SwitcherContentView: NSView {
     func clear()
     /// The panel window's size for what is rendered.
     var preferredWindowSize: CGSize { get }
+    /// For Up/Down: the `rows` index of the item `step` rows of icons away
+    /// from the one at `rowIndex` (nearest to it), `rowIndex` itself when
+    /// there is no row there, or nil when the layout has no rows to move
+    /// between — Up/Down then step through the items like Left/Right.
+    func rowIndex(from rowIndex: Int, movingRows step: Int) -> Int?
+}
+
+/// The thin line between the main group and the bottom one. Takes its color
+/// from its `appearance` (set like the labels', see `SurfaceView.textAppearance`).
+final class HUDSeparatorView: NSView {
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) { preconditionFailure("not used") }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = NSColor.tertiaryLabelColor.cgColor
+        }
+    }
 }
 
 /// The search query (or a notice) across the top of the panel, after a

@@ -1,11 +1,14 @@
 import Foundation
 import CoreGraphics
 
-/// A labelled group of entries in the switcher list. A nil title means the
-/// main (ungrouped) section shown at the top.
-struct WindowSection {
-    let title: String?
-    let items: [WindowInfo]
+/// The switcher's entries: the main group, then every category placed "at
+/// bottom", merged into one group. Each bottom entry carries a short note
+/// saying why it is there.
+struct WindowGroups {
+    var main: [WindowInfo] = []
+    var bottom: [(window: WindowInfo, note: String)] = []
+
+    var isEmpty: Bool { main.isEmpty && bottom.isEmpty }
 }
 
 /// The displays, in global display coordinates (as CGWindowList bounds), and
@@ -29,18 +32,20 @@ struct DisplayLayout {
     }
 }
 
-/// Turns a raw enumeration into ordered, filtered sections according to a
+/// Turns a raw enumeration into ordered, filtered groups according to a
 /// profile's scope / placement options. Pure function — easy to reason
 /// about and independent of any UI.
 enum WindowGrouping {
-    /// The placement categories, in the order their bottom sections appear.
+    /// The placement categories, in the order their windows appear in the
+    /// bottom group.
     enum Category: CaseIterable {
         case otherDisplay, otherSpace, minimized, hidden
 
-        var title: String {
+        /// The bottom group's note for one of these windows.
+        var note: String {
             switch self {
-            case .otherDisplay: return "Other Displays"
-            case .otherSpace: return "Other Spaces"
+            case .otherDisplay: return "Other Display"
+            case .otherSpace: return "Other Space"
             case .minimized: return "Minimized"
             case .hidden: return "Hidden"
             }
@@ -55,6 +60,9 @@ enum WindowGrouping {
             }
         }
     }
+
+    /// The bottom group's note for an app-only entry.
+    static let appOnlyNote = "No Windows"
 
     /// Minimized takes precedence, then hidden-app, then other Space, then
     /// other display; nil is a plain window. Without a `display` layout no
@@ -85,41 +93,48 @@ enum WindowGrouping {
         }
     }
 
-    static func sections(for profile: SwitcherProfile,
-                         enumeration: Enumeration,
-                         activeAppPID: pid_t?,
-                         display: DisplayLayout? = nil) -> [WindowSection] {
-        var main: [WindowInfo] = []
+    /// The note `groups` would give `window` in the bottom group, or nil when
+    /// its category is shown in the main group (or it has none). For search
+    /// results, which are one flat list but keep saying why a window would
+    /// be at the bottom.
+    static func note(for window: WindowInfo, profile: SwitcherProfile, enumeration: Enumeration,
+                     display: DisplayLayout? = nil) -> String? {
+        if window.isAppOnly {
+            return profile.appsWithoutWindows == .showAtBottom ? appOnlyNote : nil
+        }
+        guard let c = category(of: window, enumeration: enumeration, display: display),
+              c.placement(in: profile) == .showAtBottom else { return nil }
+        return c.note
+    }
+
+    static func groups(for profile: SwitcherProfile,
+                       enumeration: Enumeration,
+                       activeAppPID: pid_t?,
+                       display: DisplayLayout? = nil) -> WindowGroups {
+        var groups = WindowGroups()
         var byCategory: [Category: [WindowInfo]] = [:]
         for w in scoped(enumeration.windows, profile, activeAppPID) {
             if let c = category(of: w, enumeration: enumeration, display: display) {
                 byCategory[c, default: []].append(w)
             } else {
-                main.append(w)
+                groups.main.append(w)
             }
         }
 
-        var bottom: [WindowSection] = []
-
-        func place(_ items: [WindowInfo], _ placement: Placement, title: String) {
-            guard !items.isEmpty else { return }
+        func place(_ items: [WindowInfo], _ placement: Placement, note: String) {
             switch placement {
             case .hide: break
-            case .show: main.append(contentsOf: items)
-            case .showAtBottom: bottom.append(WindowSection(title: title, items: items))
+            case .show: groups.main.append(contentsOf: items)
+            case .showAtBottom: groups.bottom.append(contentsOf: items.map { ($0, note) })
             }
         }
 
         for c in Category.allCases {
-            place(byCategory[c] ?? [], c.placement(in: profile), title: c.title)
+            place(byCategory[c] ?? [], c.placement(in: profile), note: c.note)
         }
         place(scoped(enumeration.appsWithoutWindows, profile, activeAppPID),
-              profile.appsWithoutWindows, title: "Apps")
-
-        var sections = [WindowSection(title: nil, items: main)]
-        sections.append(contentsOf: bottom)
-        // Drop a possibly-empty main section only if nothing else exists either.
-        return sections.filter { !$0.items.isEmpty }
+              profile.appsWithoutWindows, note: appOnlyNote)
+        return groups
     }
 
     /// Scope: all apps vs the app that was active when the switcher opened.

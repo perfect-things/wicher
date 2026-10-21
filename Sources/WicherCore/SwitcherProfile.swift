@@ -17,7 +17,7 @@ enum WindowScope: Int, Codable, CaseIterable {
 /// hidden / app-only) is placed.
 enum Placement: Int, Codable, CaseIterable {
     case show = 0        // merged into the main list
-    case showAtBottom = 1 // its own section at the bottom
+    case showAtBottom = 1 // in the one group at the bottom, behind a separator
     case hide = 2         // excluded
 
     var title: String {

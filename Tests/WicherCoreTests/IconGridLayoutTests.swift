@@ -102,6 +102,59 @@ final class IconGridLayoutTests: XCTestCase {
         XCTAssertEqual(title.width, l.panelSize.width - 2 * l.inset)
     }
 
+    private func make(rows: [Int], max: CGFloat = 1400) -> IconGridLayout {
+        IconGridLayout.make(iconSize: 96, padding: 8, textSize: 13, spacing: 12, rowCounts: rows, maxPanelWidth: max)
+    }
+
+    func testSecondRowSitsBelowASeparator() throws {
+        let l = make(rows: [5, 3])
+        XCTAssertEqual(l.rows, [0..<5, 5..<8])
+        let top = l.cellFrames[0], bottom = l.cellFrames[5]
+        let line = try XCTUnwrap(l.separatorFrame)
+        XCTAssertEqual(line.minY - top.maxY, IconGridLayout.separatorGap)
+        XCTAssertEqual(bottom.minY - line.maxY, IconGridLayout.separatorGap)
+        XCTAssertEqual(line.minX, l.inset)
+        XCTAssertEqual(line.maxX, l.panelSize.width - l.inset)
+        XCTAssertEqual(l.panelSize.width, make(5).panelSize.width, "as wide as the longer row")
+        XCTAssertEqual(l.panelSize.height - l.cellFrames[7].maxY, l.inset)
+        XCTAssertEqual(l.titleFrame(forItem: 6, textWidth: 50).minY, bottom.maxY + IconGridLayout.titleGap)
+        XCTAssertEqual(l.titleFrame(forItem: 0, textWidth: 50).midX, l.panelSize.width / 2, accuracy: 1,
+                       "centered with two rows")
+    }
+
+    func testShorterRowIsCentered() {
+        for rows in [[5, 2], [2, 5]] {
+            let l = make(rows: rows)
+            let short = rows[0] < rows[1] ? l.rows[0] : l.rows[1]
+            let midX = (l.cellFrames[short.first!].minX + l.cellFrames[short.last!].maxX) / 2
+            XCTAssertEqual(midX, l.panelSize.width / 2, accuracy: 1, "\(rows)")
+        }
+    }
+
+    func testBothRowsShareTheScaleOfTheWiderOne() {
+        let l = make(rows: [3, 40], max: 1000)
+        XCTAssertLessThan(l.scale, 1)
+        XCTAssertEqual(l.cellFrames[0].size, l.cellFrames[3].size)
+        XCTAssertEqual(l.iconSize, make(40, max: 1000).iconSize)
+    }
+
+    func testEmptyRowsAreDropped() {
+        let l = make(rows: [0, 3])
+        XCTAssertEqual(l.rows, [0..<3])
+        XCTAssertNil(l.separatorFrame)
+        XCTAssertEqual(l, make(3))
+    }
+
+    func testMovingRowsPicksTheNearestIcon() {
+        let l = make(rows: [5, 3])
+        XCTAssertEqual(l.item(2, movedRows: 1), 6, "middle to middle")
+        XCTAssertEqual(l.item(0, movedRows: 1), 5)
+        XCTAssertEqual(l.item(4, movedRows: 1), 7)
+        XCTAssertEqual(l.item(7, movedRows: -1), 3)
+        XCTAssertEqual(l.item(1, movedRows: -1), 1, "no row above")
+        XCTAssertNil(make(5).item(1, movedRows: 1), "a single row has none")
+    }
+
     func testWindowAddsTheGlassMargin() {
         let l = make(3)
         XCTAssertEqual(l.windowSize,

@@ -11,12 +11,12 @@ final class SwitcherSessionTests: XCTestCase {
                         activeAppPID: activeAppPID, forward: forward)
     }
 
-    /// "#Title" for headers, the display title for items.
+    /// "—" for the separator, the display title for items, with any note in brackets.
     private func labels(_ s: SwitcherSession) -> [String] {
         s.rows.map {
             switch $0 {
-            case .header(let t): return "#" + t
-            case .item(let info, _): return info.displayTitle
+            case .separator: return "—"
+            case let .item(info, _, note): return info.displayTitle + (note.map { " [\($0)]" } ?? "")
             }
         }
     }
@@ -37,14 +37,37 @@ final class SwitcherSessionTests: XCTestCase {
 
     func testBackwardPreselectsLastRow() {
         let s = session(three + [window("m", minimized: true)], forward: false)
-        XCTAssertEqual(labels(s), ["w0", "w1", "w2", "#Minimized", "m"])
+        XCTAssertEqual(labels(s), ["w0", "w1", "w2", "—", "m [Minimized]"])
         XCTAssertEqual(s.selectedRowIndex, 4)
     }
 
-    func testForwardSkipsHeaderWhenSecondItemFollowsIt() {
+    func testForwardSkipsTheSeparatorWhenSecondItemFollowsIt() {
         let s = session([window("w0"), window("m", minimized: true)])
-        XCTAssertEqual(labels(s), ["w0", "#Minimized", "m"])
+        XCTAssertEqual(labels(s), ["w0", "—", "m [Minimized]"])
         XCTAssertEqual(s.selectedRowIndex, 2)
+    }
+
+    func testBottomGroupsMergeBehindOneSeparator() {
+        let s = session([window("w0"), window("m", minimized: true), window("h", hidden: true)],
+                        apps: [appOnly("Idle", pid: 9)])
+        XCTAssertEqual(labels(s), ["w0", "—", "m [Minimized]", "h [Hidden]", "Idle [No Windows]"])
+    }
+
+    func testNoSeparatorWithoutABottomGroup() {
+        XCTAssertEqual(labels(session(three)), ["w0", "w1", "w2"])
+    }
+
+    func testNoSeparatorWhenOnlyTheBottomGroupHasWindows() {
+        let s = session([window("m", minimized: true), window("h", hidden: true)])
+        XCTAssertEqual(labels(s), ["m [Minimized]", "h [Hidden]"])
+        XCTAssertEqual(s.selectedRowIndex, 1)
+    }
+
+    func testSearchNotesOnlyWindowsPlacedAtTheBottom() {
+        let p = profile(minimized: .show)
+        var s = session([window("mail", minimized: true), window("mac", hidden: true)], profile: p)
+        s.appendToQuery("m")
+        XCTAssertEqual(Set(labels(s)), ["mail", "mac [Hidden]"])
     }
 
     func testEmptySessionHasNoSelection() {
@@ -85,10 +108,10 @@ final class SwitcherSessionTests: XCTestCase {
 
     // MARK: - select(rowIndex:)
 
-    func testSelectRejectsHeaderAndOutOfRange() {
+    func testSelectRejectsSeparatorAndOutOfRange() {
         var s = session([window("w0"), window("m", minimized: true)])
         s.advance(by: -1)                        // select w0
-        XCTAssertFalse(s.select(rowIndex: 1))    // the header
+        XCTAssertFalse(s.select(rowIndex: 1))    // the separator
         XCTAssertFalse(s.select(rowIndex: 3))
         XCTAssertFalse(s.select(rowIndex: -1))
         XCTAssertEqual(s.selectedRowIndex, 0)
@@ -133,8 +156,8 @@ final class SwitcherSessionTests: XCTestCase {
     func testSearchIsFlatWithHighlightRanges() {
         var s = session([window("w0"), window("mail", minimized: true)])
         s.appendToQuery("m")
-        XCTAssertEqual(labels(s), ["mail"])     // no "#Minimized" header
-        guard case let .item(_, ranges) = s.rows[0] else { return XCTFail() }
+        XCTAssertEqual(labels(s), ["mail [Minimized]"])   // no separator, but the note stays
+        guard case let .item(_, ranges, _) = s.rows[0] else { return XCTFail() }
         XCTAssertEqual(ranges, [NSRange(location: 0, length: 1)])
     }
 
@@ -183,7 +206,7 @@ final class SwitcherSessionTests: XCTestCase {
         s.appendToQuery("a")
         s.appendToQuery("b")
         XCTAssertEqual(labels(s), ["abcdef", "zz", "abcdefgh"])
-        guard case let .item(_, ranges) = s.rows[1] else { return XCTFail() }
+        guard case let .item(_, ranges, _) = s.rows[1] else { return XCTFail() }
         XCTAssertEqual(ranges, [], "app-name-only match highlights nothing in the title")
     }
 }

@@ -14,7 +14,8 @@ struct HUDMetrics: Equatable {
     let titleSize: CGFloat
     let appSize: CGFloat
     let rowHeight: CGFloat
-    let headerHeight: CGFloat
+    /// The gap between the main group and the bottom one; the line is in its middle.
+    let separatorHeight: CGFloat
     let panelWidth: CGFloat
     /// Width of the right-aligned app-name column left of the icon:
     /// `appColumnFraction` of the panel, or zero when app names are turned
@@ -48,6 +49,10 @@ struct HUDMetrics: Equatable {
     static let rowTrailingInset: CGFloat = 16
     static let appToIcon: CGFloat = 10
     static let iconToTitle: CGFloat = 12
+    /// Between the title and a bottom-group row's note.
+    static let titleToNote: CGFloat = 10
+    /// The note never takes more than this share of the row.
+    static let maxNoteFraction: CGFloat = 0.3
     /// Share of the panel width given to the app-name column, so it keeps
     /// its proportion however wide or narrow the panel is.
     static let appColumnFraction: CGFloat = 0.25
@@ -75,7 +80,7 @@ struct HUDMetrics: Equatable {
             titleSize: t,
             appSize: max(10, (t * 0.82).rounded()),
             rowHeight: rowHeight,
-            headerHeight: max(20, (t * 1.5).rounded()),
+            separatorHeight: max(9, (t * 0.75).rounded()),
             panelWidth: panelWidth,
             appColumnWidth: showAppNames ? (panelWidth * appColumnFraction).rounded(.down) : 0,
             panelCornerRadius: defaultPanelCornerRadius,

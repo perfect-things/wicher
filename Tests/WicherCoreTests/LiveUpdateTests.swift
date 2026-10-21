@@ -46,6 +46,12 @@ final class LiveUpdateTests: XCTestCase {
         XCTAssertEqual(s.selectedRowIndex, selected)
     }
 
+    func testBottomNoteChangeRedraws() {
+        var s = session([win("A", id: 1), window("B", minimized: true, wid: 2)])
+        XCTAssertTrue(s.update(enumeration: enumeration([win("A", id: 1), window("B", hidden: true, wid: 2)])),
+                      "Minimized → Hidden changes the note")
+    }
+
     func testUpdateRespectsActiveQuery() {
         var s = session([win("Mail", id: 1), win("Notes", id: 2)])
         s.appendToQuery("n")

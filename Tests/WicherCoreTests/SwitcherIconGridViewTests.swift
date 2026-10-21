@@ -19,7 +19,7 @@ final class SwitcherIconGridViewTests: XCTestCase {
 
     private func cells(_ view: NSView) -> [SwitcherIconCellView] {
         if let cell = view as? SwitcherIconCellView { return cell.isHidden ? [] : [cell] }
-        return view.subviews.flatMap(cells).sorted { $0.frame.minX < $1.frame.minX }
+        return view.subviews.flatMap(cells).sorted { ($0.frame.minY, $0.frame.minX) < ($1.frame.minY, $1.frame.minX) }
     }
 
     private func titleField(_ view: NSView) -> NSTextField? {
@@ -30,8 +30,8 @@ final class SwitcherIconGridViewTests: XCTestCase {
     private let sample: [DisplayRow] = [
         .item(window("Inbox", app: "Mail"), []),
         .item(window("Notes", app: "Notes"), []),
-        .header("Minimized"),
-        .item(window("Old", app: "Mail", minimized: true), []),
+        .separator,
+        .item(window("Old", app: "Mail", minimized: true), [], note: "Minimized"),
     ]
 
     func testOneCellPerItemAtTheLayoutsFrames() {
@@ -41,8 +41,35 @@ final class SwitcherIconGridViewTests: XCTestCase {
         XCTAssertEqual(frames, view.layoutInfo.cellFrames)
         XCTAssertEqual(frames.count, 3)
         XCTAssertEqual(cells(view).map(\.displayIndex), [0, 1, 3])
-        XCTAssertEqual(frames[2].minX - frames[1].maxX, frames[1].minX - frames[0].maxX,
-                       "no extra gap where the Minimized section starts")
+        XCTAssertEqual(view.layoutInfo.rows, [0..<2, 2..<3], "the bottom group gets a row of its own")
+        XCTAssertGreaterThan(frames[2].minY, frames[1].maxY)
+        XCTAssertEqual(frames[2].size, frames[0].size, "same size as the main row")
+    }
+
+    private func separator(_ view: NSView) -> HUDSeparatorView? {
+        if let line = view as? HUDSeparatorView { return line }
+        return view.subviews.lazy.compactMap(separator).first
+    }
+
+    func testSeparatorOnlyBetweenTwoRows() throws {
+        let view = makeView()
+        render(view, sample)
+        let line = try XCTUnwrap(separator(view))
+        XCTAssertFalse(line.isHidden)
+        XCTAssertEqual(line.frame, view.layoutInfo.separatorFrame)
+        render(view, Array(sample.prefix(2)))
+        XCTAssertTrue(line.isHidden)
+    }
+
+    func testUpDownMoveBetweenRows() {
+        let view = makeView()
+        render(view, sample)
+        XCTAssertEqual(view.rowIndex(from: 0, movingRows: 1), 3)
+        XCTAssertEqual(view.rowIndex(from: 3, movingRows: -1), 0, "nearest, the left one on a tie")
+        XCTAssertEqual(view.rowIndex(from: 3, movingRows: 1), 3, "no row below: stay")
+        XCTAssertEqual(view.rowIndex(from: 1, movingRows: -1), 1, "no row above: stay")
+        render(view, Array(sample.prefix(2)))
+        XCTAssertNil(view.rowIndex(from: 0, movingRows: 1), "one row: move like Left/Right")
     }
 
     func testCellsAreReusedAcrossRenders() {
@@ -66,7 +93,7 @@ final class SwitcherIconGridViewTests: XCTestCase {
         XCTAssertEqual(title.stringValue, "Notes")
         XCTAssertGreaterThanOrEqual(title.frame.width, title.attributedStringValue.size().width,
                                     "a short title is not truncated")
-        XCTAssertEqual(title.frame.midX, cells(view)[1].frame.midX, accuracy: 1)
+        XCTAssertEqual(title.frame.midX, view.layoutInfo.panelSize.width / 2, accuracy: 1, "two rows: centered")
 
         view.setHovered(rowIndex: 3)
         XCTAssertEqual(title.stringValue, "Old")
@@ -108,7 +135,7 @@ final class SwitcherIconGridViewTests: XCTestCase {
     /// bottom one, so searching doesn't grow the panel.
     func testSearchingKeepsThePanelSize() throws {
         let view = makeView()
-        render(view, sample)
+        render(view, Array(sample.prefix(2)))   // one row, as search results always are
         let before = view.preferredWindowSize
         view.setQuery("in")
         render(view, Array(sample.prefix(2)))
