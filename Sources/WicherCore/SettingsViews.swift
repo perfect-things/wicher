@@ -152,16 +152,13 @@ private struct AppearancePane: View {
                 }
             }
 
-            Section("Background") {
-                SurfaceRows(surface: $settings.backgroundSurface)
-            }
-
             Section {
-                SurfaceRows(surface: $settings.highlightSurface)
+                SurfaceRow(title: "Panel background", surface: $settings.backgroundSurface)
+                SurfaceRow(title: "Selection highlight", surface: $settings.highlightSurface)
             } header: {
-                Text("Selection highlight")
+                SurfaceRow.ColumnCaptions()
             } footer: {
-                Text("Solid fills with the tint color. Text switches to light or dark to stay readable on it.")
+                Text("Set a tint's opacity in the color panel. Solid fills with the tint color. Text switches to light or dark to stay readable on it.")
                     .font(.callout).foregroundStyle(.secondary)
             }
 
@@ -391,47 +388,167 @@ private struct AboutPane: View {
 
 // MARK: - Shared rows
 
-/// A surface's style picker, then its tint for Light and for Dark mode.
-private struct SurfaceRows: View {
+/// A surface on one row: its style, then its tint for Light and for Dark
+/// mode, in columns that `ColumnCaptions` (the section header) names.
+private struct SurfaceRow: View {
+    let title: String
     @Binding var surface: SurfaceAppearance
 
-    var body: some View {
-        Picker("Style", selection: $surface.style) {
-            ForEach(SurfaceStyle.allCases, id: \.self) { Text($0.title).tag($0) }
-        }
-        TintRow(title: "Light mode tint", tint: $surface.light)
-        TintRow(title: "Dark mode tint", tint: $surface.dark)
-    }
-}
-
-/// A color well and an opacity slider. Opacity is its own slider, not the
-/// color panel's, so 0% (no tint) is one drag away.
-private struct TintRow: View {
-    let title: String
-    @Binding var tint: Tint
+    static let styleWidth: CGFloat = 130
+    static let tintWidth: CGFloat = 66
+    static let spacing: CGFloat = 10
 
     var body: some View {
         LabeledContent {
-            HStack(spacing: 10) {
-                ColorPicker(title, selection: color, supportsOpacity: false)
-                    .labelsHidden()
-                Slider(value: $tint.opacity[sliderStep: 1],
-                       in: Double(Tint.opacityRange.lowerBound)...Double(Tint.opacityRange.upperBound))
-                    .labelsHidden()
-                    .frame(minWidth: 80, maxWidth: 170)
-                Text("\(tint.opacity) %")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .frame(width: 52, alignment: .trailing)
+            HStack(spacing: Self.spacing) {
+                Picker("\(title) style", selection: $surface.style) {
+                    ForEach(SurfaceStyle.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .labelsHidden()
+                .fixedSize()
+                .frame(width: Self.styleWidth, alignment: .trailing)
+                TintWell(title: "\(title) Light mode tint", tint: $surface.light)
+                    .frame(width: Self.tintWidth, alignment: .leading)
+                TintWell(title: "\(title) Dark mode tint", tint: $surface.dark)
+                    .frame(width: Self.tintWidth, alignment: .leading)
             }
         } label: {
             SettingLabel(title)
         }
     }
 
-    private var color: Binding<Color> {
-        Binding(get: { Color(nsColor: tint.color.nsColor) },
-                set: { tint.color = RGBColor(NSColor($0)) })
+    struct ColumnCaptions: View {
+        var body: some View {
+            HStack(spacing: SurfaceRow.spacing) {
+                Spacer()
+                Text("Style").frame(width: SurfaceRow.styleWidth, alignment: .trailing)
+                Text("Light tint").frame(width: SurfaceRow.tintWidth, alignment: .leading)
+                Text("Dark tint").frame(width: SurfaceRow.tintWidth, alignment: .leading)
+            }
+            .font(.caption)
+            .fontWeight(.regular)
+            .foregroundStyle(.secondary)
+            .accessibilityHidden(true)
+        }
+    }
+}
+
+/// A color well whose color panel sets the opacity too, and a clear button
+/// that takes the tint to 0% — no tint at all.
+private struct TintWell: View {
+    let title: String
+    @Binding var tint: Tint
+
+    var body: some View {
+        HStack(spacing: 4) {
+            CheckerColorWell.Representable(title: title, color: color)
+                .help("\(tint.opacity) %")
+            // Hidden, not removed, when there's nothing to clear, so the
+            // columns don't shift.
+            Button("Clear \(title)", systemImage: "xmark.circle.fill") { tint.opacity = 0 }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help("No tint")
+                .opacity(tint.opacity == 0 ? 0 : 1)
+                .disabled(tint.opacity == 0)
+                .accessibilityHidden(tint.opacity == 0)
+        }
+    }
+
+    private var color: Binding<NSColor> {
+        Binding(get: { tint.color.nsColor.withAlphaComponent(tint.alpha) },
+                set: { picked in
+                    let rgb = RGBColor(picked)
+                    var opacity = Int(((picked.usingColorSpace(.sRGB)?.alphaComponent ?? 1) * 100).rounded())
+                    // A cleared tint hands the panel a transparent color, and
+                    // picking another color would keep it invisible: a new
+                    // color on a cleared tint comes in opaque.
+                    if opacity == 0, tint.opacity == 0, !rgb.isClose(to: tint.color) { opacity = 100 }
+                    tint = Tint(color: rgb, opacity: opacity)
+                })
+    }
+}
+
+/// A color well that shows a translucent color as one swatch over a
+/// checkerboard, not AppKit's diagonal split into opaque and translucent.
+/// SwiftUI's `ColorPicker` can't change that, and the well draws itself with
+/// SwiftUI inside (`drawWell(inside:)` is never called), so the swatch is a
+/// view laid over the well's own, which keeps the well's ring, clicks and
+/// color panel.
+final class CheckerColorWell: NSColorWell {
+    /// The well's own swatch sits this far inside its bounds (measured; the
+    /// ring around it is the well's).
+    private static let swatchInset: CGFloat = 3
+
+    private let swatch = Swatch()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        addSubview(swatch)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var color: NSColor {
+        didSet { swatch.color = color }
+    }
+
+    override func layout() {
+        super.layout()
+        // On top of the well's hosting view, which may be (re)added later.
+        if subviews.last !== swatch { addSubview(swatch, positioned: .above, relativeTo: nil) }
+        swatch.frame = bounds.insetBy(dx: Self.swatchInset, dy: Self.swatchInset)
+    }
+
+    private final class Swatch: NSView {
+        var color: NSColor = .clear {
+            didSet { needsDisplay = true }
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func draw(_ dirtyRect: NSRect) {
+            NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2).addClip()
+            NSColor.white.setFill()
+            bounds.fill()
+            NSColor(white: 0.78, alpha: 1).setFill()
+            let side: CGFloat = 4
+            for row in 0..<Int((bounds.height / side).rounded(.up)) {
+                for column in stride(from: row % 2, to: Int((bounds.width / side).rounded(.up)), by: 2) {
+                    NSRect(x: CGFloat(column) * side, y: CGFloat(row) * side, width: side, height: side).fill()
+                }
+            }
+            color.setFill()
+            bounds.fill(using: .sourceOver)
+        }
+    }
+
+    struct Representable: NSViewRepresentable {
+        let title: String
+        @Binding var color: NSColor
+
+        func makeNSView(context: Context) -> CheckerColorWell {
+            let well = CheckerColorWell()
+            well.supportsAlpha = true
+            well.target = context.coordinator
+            well.action = #selector(Coordinator.colorChanged(_:))
+            return well
+        }
+
+        func updateNSView(_ well: CheckerColorWell, context: Context) {
+            context.coordinator.color = $color
+            well.setAccessibilityLabel(title)
+            if well.color != color { well.color = color }
+        }
+
+        func makeCoordinator() -> Coordinator { Coordinator(color: $color) }
+
+        @MainActor final class Coordinator: NSObject {
+            var color: Binding<NSColor>
+            init(color: Binding<NSColor>) { self.color = color }
+            @objc func colorChanged(_ well: NSColorWell) { color.wrappedValue = well.color }
+        }
     }
 }
 

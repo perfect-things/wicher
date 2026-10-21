@@ -26,7 +26,7 @@ enum SurfaceStyle: Int, Codable, CaseIterable, Sendable {
     var isGlass: Bool { self == .glass || self == .clearGlass }
 }
 
-/// An sRGB color without alpha (opacity is a `Tint`'s own setting), in a form
+/// An sRGB color without alpha (opacity is a `Tint`'s own field), in a form
 /// UserDefaults and `Settings.observe` can carry.
 struct RGBColor: Codable, Equatable, Sendable {
     var red: Double
@@ -55,6 +55,11 @@ struct RGBColor: Codable, Equatable, Sendable {
         RGBColor(red: red + (other.red - red) * alpha,
                  green: green + (other.green - green) * alpha,
                  blue: blue + (other.blue - blue) * alpha)
+    }
+
+    /// Equal but for rounding (a color's round trip through the color panel).
+    func isClose(to other: RGBColor) -> Bool {
+        max(abs(red - other.red), abs(green - other.green), abs(blue - other.blue)) < 0.01
     }
 
     /// Perceived brightness, 0…1 (the YIQ luma of the gamma-encoded values).
