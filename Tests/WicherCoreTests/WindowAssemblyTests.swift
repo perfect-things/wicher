@@ -172,6 +172,51 @@ final class WindowAssemblyTests: XCTestCase {
         XCTAssertEqual(r.windows.first?.onCurrentSpace, true)
     }
 
+    func testTabsOfAnAppOnAnotherSpaceGiveOneRow() {
+        // Ghostty with three tabs on another Space: AX reports nothing, but it
+        // titled every tab while it was selected. Inactive tabs are in no Space.
+        var caches = WindowCaches()
+        caches.titles = [170: "zsh", 171: "vim", 172: "htop"]
+        var tab2 = fact(171, pid: 17, onscreen: false), tab3 = fact(172, pid: 17, onscreen: false)
+        tab2.isOrderedOut = true
+        tab3.isOrderedOut = true
+        let r = assemble(facts: [fact(170, pid: 17, onscreen: false), tab2, tab3],
+                         metas: [meta(17, "Ghostty")], scans: [17: answered([])], caches: caches)
+        XCTAssertEqual(titles(r), ["zsh"])
+    }
+
+    func testClosedButRetainedWindowIsNotARow() {
+        // A menu-bar app's Settings, closed but kept alive: still in
+        // CGWindowList, still titled in the cache, but in no Space.
+        var caches = WindowCaches()
+        caches.titles[180] = "Settings"
+        var closed = fact(180, pid: 18, onscreen: false)
+        closed.isOrderedOut = true
+        let r = assemble(facts: [closed], metas: [meta(18, "Dato", regular: false)],
+                         scans: [18: answered([])], caches: caches)
+        XCTAssertTrue(r.windows.isEmpty)
+        XCTAssertTrue(r.appsWithoutWindows.isEmpty)
+        XCTAssertEqual(r.caches.titles[180], "Settings")   // kept for when it reopens
+    }
+
+    func testOrderedOutWindowIsNeverTheStandIn() {
+        var tab = fact(191, pid: 19, onscreen: false, size: screen)
+        tab.isOrderedOut = true
+        let r = assemble(facts: [fact(190, pid: 19, onscreen: false), tab],
+                         metas: [meta(19, "Safari")], scans: [19: timedOut])
+        XCTAssertEqual(r.windows.map(\.cgWindowID), [190])
+    }
+
+    func testOrderedOutButCachedMinimizedWindowIsKept() {
+        var caches = WindowCaches()
+        caches.titles[200] = "Draft"
+        caches.minimized[200] = true
+        var minimized = fact(200, pid: 20, onscreen: false)
+        minimized.isOrderedOut = true
+        let r = assemble(facts: [minimized], metas: [meta(20, "Mail")], scans: [20: timedOut], caches: caches)
+        XCTAssertEqual(titles(r), ["Draft"])
+    }
+
     // MARK: - Spaces
 
     func testSpaceMembership() {

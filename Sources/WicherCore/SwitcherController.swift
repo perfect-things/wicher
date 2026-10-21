@@ -30,6 +30,12 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
 
     private var localMonitor: Any?
     private var globalMonitor: Any?
+    /// Polls the real modifier state while a hot-key session is open. The
+    /// monitors see a release only if they were installed before it happened
+    /// and the event reached them; a summon that had to scan synchronously,
+    /// or a busy main thread, can lose it and leave the panel up.
+    private var releaseWatchdog: Timer?
+    private let releaseWatchdogInterval: TimeInterval = 0.25
 
     // Auto-repeat while the trigger is held down.
     private var holdDirection: Int?
@@ -66,7 +72,7 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
         if session != nil {
             advance(by: forward ? 1 : -1)
         } else {
-            beginSession(profile: profile, forward: forward)
+            beginSession(profile: profile, forward: forward, held: false)
         }
     }
 
@@ -85,7 +91,7 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
                 advance(by: dir, wrap: true) // a fresh discrete press wraps
                 startHoldTimer()
             } else {
-                beginSession(profile: profile, forward: forward)
+                beginSession(profile: profile, forward: forward, held: true)
             }
         } else {
             if holdDirection == dir {
@@ -97,7 +103,9 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
 
     // MARK: - Session lifecycle
 
-    private func beginSession(profile: SwitcherProfile, forward: Bool) {
+    /// `held`: opened by a hot key whose modifiers are being held, so their
+    /// release commits. The menu entry point holds nothing.
+    private func beginSession(profile: SwitcherProfile, forward: Bool, held: Bool) {
         sessionScreen = screenWithMouse() ?? NSScreen.main
         contentView = profile.layout == .icons ? gridView : listView
         if panel.contentView !== contentView { panel.contentView = contentView }
@@ -120,6 +128,12 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
 
         panelShown = false
         startMonitors()
+        if held {
+            // Released while the snapshot was being built: commit now, as a
+            // quick tap would.
+            guard triggerHeld() else { commit(); return }
+            startReleaseWatchdog()
+        }
 
         let delay = Settings.shared.showDelayMs
         if delay <= 0 {
@@ -147,6 +161,8 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
         stopHoldTimer()
         holdDirection = nil
         stopMonitors()
+        releaseWatchdog?.invalidate()
+        releaseWatchdog = nil
         if panelShown { panel.orderOut(nil) }
         contentView.clear()
         session = nil
@@ -193,6 +209,24 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     private func triggerReleased(by event: NSEvent) -> Bool {
         guard let trigger = session?.profile.combo.eventModifierFlags, !trigger.isEmpty else { return false }
         return !event.modifierFlags.contains(trigger)
+    }
+
+    /// Whether the trigger's modifiers are physically held right now — read
+    /// from the hardware state, not from an event that may never arrive.
+    private func triggerHeld() -> Bool {
+        guard let trigger = session?.profile.combo.eventModifierFlags, !trigger.isEmpty else { return true }
+        return NSEvent.modifierFlags.contains(trigger)
+    }
+
+    private func startReleaseWatchdog() {
+        let timer = Timer(timeInterval: releaseWatchdogInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {   // added to RunLoop.main
+                guard let self, self.session != nil, !self.triggerHeld() else { return }
+                self.commit()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        releaseWatchdog = timer
     }
 
     private func handleLocal(_ event: NSEvent) -> NSEvent? {

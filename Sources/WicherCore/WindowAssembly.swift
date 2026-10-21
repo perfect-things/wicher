@@ -22,6 +22,11 @@ struct CGWindowFact {
     let order: Int
     let size: CGSize
     let alpha: Double
+    /// Exists but is in no Space: an inactive tab of a native tab group, or a
+    /// window its app closed but kept alive. Neither is a switch target, and
+    /// both would otherwise pass for a window on another Space. Only resolved
+    /// for off-screen windows during a full scan (see `SpacesPrivate`).
+    var isOrderedOut = false
 
     /// Could plausibly be a user-facing window.
     ///
@@ -187,9 +192,18 @@ enum WindowAssembly {
         // Must stay gated on `appsWithAXWindows`: an app AX *did* answer for
         // also owns off-screen layer-0 windows, and those would become phantom
         // rows.
+        //
+        // Ordered-out windows are skipped even with a cached title: AX titled
+        // every tab of a group while it was selected (one row per tab once the
+        // app is on another Space), and a closed-but-retained window stays
+        // alive, so its cache entry would never be pruned. A minimized window
+        // keeps its Space; the cache check only guards against that changing.
         for meta in metas where meta.name != "Unknown" && meta.pid != selfPID
             && !appsWithAXWindows.contains(meta.pid) {
-            let candidates = facts.filter { $0.pid == meta.pid && $0.isPlausibleWindow && !emitted.contains($0.id) }
+            let candidates = facts.filter {
+                $0.pid == meta.pid && $0.isPlausibleWindow && !emitted.contains($0.id)
+                    && !($0.isOrderedOut && caches.minimized[$0.id] != true)
+            }
             guard !candidates.isEmpty else { continue }
 
             // High confidence: on screen now, or a window we have previously

@@ -257,7 +257,7 @@ final class WindowEnumerator: @unchecked Sendable {
     /// Costs a few milliseconds, so it runs on every summon.
     private func reconcile(_ snap: Snapshot) -> Snapshot {
         let selfPID = ProcessInfo.processInfo.processIdentifier
-        let facts = windowFacts()
+        let facts = windowFacts(resolvingSpaces: false)
         let currentSpace = WindowAssembly.currentSpace(facts)
         let live = Set(facts.map(\.id))
 
@@ -624,7 +624,10 @@ final class WindowEnumerator: @unchecked Sendable {
     /// Every window in the session — on screen or not — with id, owner, layer
     /// and size. Reading those does NOT require Screen Recording; only
     /// `kCGWindowName` would.
-    private func windowFacts() -> [CGWindowFact] {
+    ///
+    /// `resolvingSpaces` also sets `isOrderedOut` — one window-server call per
+    /// plausible off-screen window, so not on the summon path (`reconcile`).
+    private func windowFacts(resolvingSpaces: Bool = true) -> [CGWindowFact] {
         let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
         guard let infos = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
             return []
@@ -641,13 +644,17 @@ final class WindowEnumerator: @unchecked Sendable {
                let rect = CGRect(dictionaryRepresentation: bounds) {
                 size = rect.size
             }
-            facts.append(CGWindowFact(id: number,
-                                      pid: owner,
-                                      layer: layer,
-                                      isOnscreen: (info[kCGWindowIsOnscreen as String] as? Bool) ?? false,
-                                      order: index,
-                                      size: size,
-                                      alpha: (info[kCGWindowAlpha as String] as? Double) ?? 1))
+            var fact = CGWindowFact(id: number,
+                                    pid: owner,
+                                    layer: layer,
+                                    isOnscreen: (info[kCGWindowIsOnscreen as String] as? Bool) ?? false,
+                                    order: index,
+                                    size: size,
+                                    alpha: (info[kCGWindowAlpha as String] as? Double) ?? 1)
+            if resolvingSpaces, !fact.isOnscreen, fact.isPlausibleWindow {
+                fact.isOrderedOut = SpacesPrivate.isInAnySpace(number) == false
+            }
+            facts.append(fact)
         }
         return facts
     }
@@ -747,6 +754,7 @@ final class WindowEnumerator: @unchecked Sendable {
         out += "wicher diagnostics — \(Date())\n"
         out += "AXIsProcessTrusted: \(AXIsProcessTrusted())\n"
         out += "_AXUIElementGetWindow available: \(AXPrivate.isAvailable)\n"
+        out += "CGSCopySpacesForWindows available: \(SpacesPrivate.isAvailable)\n"
 
         let facts = windowFacts()
         var byPID: [pid_t: [CGWindowFact]] = [:]
@@ -759,8 +767,14 @@ final class WindowEnumerator: @unchecked Sendable {
         lock.unlock()
         out += "snapshot age: \(age.map { String(format: "%.2fs", $0) } ?? "none"), cached titles: \(cachedTitles)\n\n"
 
+        // Regular apps, plus menu-bar apps that own something window-like —
+        // their Settings windows are switch targets too.
         let apps = NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular && !$0.isTerminated }
+            .filter { app in
+                !app.isTerminated && (app.activationPolicy == .regular
+                    || (app.activationPolicy == .accessory
+                        && byPID[app.processIdentifier]?.contains(where: \.isPlausibleWindow) == true))
+            }
         for app in apps {
             let pid = app.processIdentifier
             let started = Date()
@@ -779,7 +793,7 @@ final class WindowEnumerator: @unchecked Sendable {
             for fact in (byPID[pid] ?? []) where fact.layer == 0 && !axIDs.contains(fact.id) {
                 out += "    CG-only wid=\(fact.id) on=\(fact.isOnscreen) "
                 out += "size=\(Int(fact.size.width))x\(Int(fact.size.height)) alpha=\(fact.alpha) "
-                out += "plausible=\(fact.isPlausibleWindow)\n"
+                out += "plausible=\(fact.isPlausibleWindow) orderedOut=\(fact.isOrderedOut)\n"
             }
         }
         return out
