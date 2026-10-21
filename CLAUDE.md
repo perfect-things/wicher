@@ -211,12 +211,26 @@ Classification lives in `WindowAssembly` (tested); collection,
 caching, `reconcile` and observers in `WindowEnumerator` (not tested).
 
 **Summon path.** `enumerate()` serves the cached snapshot if it is < `maxSnapshotAge`
-(2.5 s) old, after `reconcile()` patches it cheaply: CGWindowList (which windows still
-exist / are on this Space), `NSRunningApplication.isHidden`, and one AX round trip to
-the frontmost app only. Only a missing/stale snapshot triggers a synchronous
-`performScan`. Background scans are driven by per-app `AXObserver`s, `NSWorkspace`
-notifications, and a 2 s safety timer (`refreshInterval`, suspended while displays
-sleep); a refresh requested during a scan re-runs afterwards rather than being dropped.
+(`refreshInterval` + 2.5 s) old, after `reconcile()` patches it cheaply: CGWindowList
+(which windows still exist / are on this Space), `NSRunningApplication.isHidden`, and
+one AX round trip to the frontmost app only — capped by `reconcileTimeout` (0.05 s;
+`scanApp` gives up at the first timed-out message), so a busy app can't hold the panel.
+Only a missing/stale snapshot triggers a synchronous `performScan`. Background refreshes
+are **scoped** (`RefreshScope`): an AX notification or `NSWorkspace` app notification
+names its app, and `rescan` asks that app alone, then re-runs `assemble` over fresh
+CGWindowList facts plus every other app's last answer (`lastScans`). Only the 5 s safety
+timer (`refreshInterval`, suspended while displays sleep), a Space/display change and a
+summon run the full `performScan` — a full pass is ~200 AX round trips that wake napping
+apps. Coalesced requests merge their scopes; one requested during a scan re-runs
+afterwards rather than being dropped. **Every `NSRunningApplication` property read,
+`processIdentifier` included, is a LaunchServices round trip (~0.1 ms)**, and
+`runningApplications` has ~200 entries: only the full pass walks it. Rescans and
+`reconcile` take app metadata from `metaCache` (pruned with `kill(pid, 0)`, cleared on
+`didTerminate`) and read live only the apps being rescanned, or a frontmost app launched
+since the last pass. The AX observer callback does no IPC on the main thread:
+registering a new window's destruction notification goes to `scanQueue`.
+At launch `SwitcherController.warmUp()` renders a dummy session into the hidden panel
+(both layouts, with a highlight) so the first ⌥Tab doesn't pay SwiftUI/glass setup.
 
 - **Titles come from AX (`kAXTitleAttribute`), never `kCGWindowName`.** That is the whole
   reason the app needs only Accessibility and not Screen Recording. Reaching for

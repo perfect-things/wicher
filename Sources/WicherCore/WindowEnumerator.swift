@@ -38,6 +38,30 @@ private struct SelfWindow {
     let minimized: Bool
 }
 
+/// Which apps a background refresh must ask again.
+private enum RefreshScope: Equatable {
+    case none
+    /// Only these; every other app keeps its last AX answer (`rescan`).
+    case apps(Set<pid_t>)
+    /// Every app (`performScan`).
+    case all
+
+    mutating func merge(_ other: RefreshScope) {
+        switch other {
+        case .none:
+            return
+        case .all:
+            self = .all
+        case let .apps(theirs):
+            if case let .apps(mine) = self {
+                self = .apps(mine.union(theirs))
+            } else if self == .none {
+                self = other
+            }
+        }
+    }
+}
+
 /// An unordered scan result. MRU ordering is applied at read time, not here,
 /// so a cached snapshot still reflects the newest recency stamps.
 private struct Snapshot {
@@ -54,8 +78,12 @@ private struct Snapshot {
 ///
 /// Scanning is kept *off* the summon path: `start()` installs AX observers and
 /// a low-frequency refresh so a snapshot is almost always warm, and
-/// `enumerate()` serves that snapshot. The cold path (no usable snapshot) still
-/// scans synchronously, but queries every app in parallel rather than serially.
+/// `enumerate()` serves that snapshot. An AX notification names the app it
+/// came from, so most refreshes ask that one app again (`rescan`) and keep
+/// every other app's last answer; only the safety timer, a Space or display
+/// change, and a summon run the full pass. The cold path (no usable snapshot)
+/// still scans synchronously, but queries every app in parallel rather than
+/// serially.
 ///
 /// Concurrency: `@unchecked Sendable`, synchronized by hand rather than by an
 /// actor, because the summon path (`enumerate()`) must stay synchronous. State
@@ -89,6 +117,21 @@ final class WindowEnumerator: @unchecked Sendable {
     private var snapshot: Snapshot?
     /// Per-window title / element / minimized memory; see `WindowCaches`.
     private var caches = WindowCaches()
+    /// Every app's AX answer from the last pass, so `rescan` can ask one app
+    /// and rebuild the snapshot with the rest as they were.
+    private var lastScans: [pid_t: AppScan] = [:]
+    /// When `performScan` last ran. The safety timer keys off this, not the
+    /// snapshot's age: per-app rescans keep the snapshot young, and the apps
+    /// without observers need the full pass.
+    private var fullScanAt: Date?
+    /// `AppMeta` by pid from the last full pass, updated per app since; nil
+    /// marks a process that is skipped (`.prohibited`). Every
+    /// `NSRunningApplication` property read — `processIdentifier` included —
+    /// is a LaunchServices round trip, ~0.1 ms, and `runningApplications`
+    /// has a couple of hundred entries, so walking it costs ~20 ms. Only the
+    /// full pass does; a rescan and `reconcile` work from this cache. See
+    /// `runningMetas(refreshing:)`.
+    private var metaCache: [pid_t: AppMeta?] = [:]
     /// App icons by bundle id (or pid, for the odd app without one).
     /// `NSRunningApplication.icon` is not free, and a scan runs every 2 s.
     private var iconCache: [String: NSImage] = [:]
@@ -105,7 +148,10 @@ final class WindowEnumerator: @unchecked Sendable {
     @MainActor private var pendingRefresh: DispatchWorkItem?
     @MainActor private var refreshRequestedAt: Date?
     @MainActor private var refreshInFlight = false
-    @MainActor private var refreshAgain = false
+    /// What the pending refresh must cover; grows as requests coalesce.
+    @MainActor private var pendingScope = RefreshScope.none
+    /// Requests that arrived during a scan, run after it.
+    @MainActor private var refreshAgainScope = RefreshScope.none
     @MainActor private var suspended = false
     @MainActor private var started = false
 
@@ -114,12 +160,16 @@ final class WindowEnumerator: @unchecked Sendable {
                                             qos: .userInitiated,
                                             attributes: .concurrent)
 
-    /// How old a snapshot may be and still be served to a summon.
-    private let maxSnapshotAge: TimeInterval = 2.5
-    /// Safety-net refresh cadence. AX observers do most of the work; this
-    /// catches apps whose observers never attached and keeps the next summon
-    /// instant even after a long idle period.
-    private let refreshInterval: TimeInterval = 2.0
+    /// Safety-net full-scan cadence. AX observers drive per-app rescans; this
+    /// catches apps whose observers never attached (and anything a
+    /// notification missed) and keeps the next summon instant even after a
+    /// long idle period. A full pass is ~200 AX round trips that wake napping
+    /// apps, hence seconds rather than the two it used to be.
+    private let refreshInterval: TimeInterval = 5.0
+    /// How old a snapshot may be and still be served to a summon. Past the
+    /// timer's cadence, so a quiet desktop never falls into a synchronous
+    /// scan; `reconcile` covers what changed meanwhile.
+    private var maxSnapshotAge: TimeInterval { refreshInterval + 2.5 }
     /// AX messaging timeout for background scans — generous, because nothing
     /// is waiting on them.
     private let backgroundTimeout: TimeInterval = 1.0
@@ -127,6 +177,11 @@ final class WindowEnumerator: @unchecked Sendable {
     /// one wedged app cannot stall the HUD; the title/AX caches cover whatever
     /// a timeout loses.
     private let foregroundTimeout: TimeInterval = 0.2
+    /// AX messaging timeout for `reconcile`'s look at the frontmost app, which
+    /// runs on every summon: a busy app (compiling, loading a page) must not
+    /// hold the panel. `scanApp` gives up at the first timeout, so this bounds
+    /// the wait at two round trips.
+    private let reconcileTimeout: TimeInterval = 0.05
 
     /// Registered on each app element. Window destruction is not among them:
     /// `kAXUIElementDestroyedNotification` on an *app* element reports the
@@ -185,7 +240,7 @@ final class WindowEnumerator: @unchecked Sendable {
         mruPIDs.insert(pid, at: 0)
         // Record the app's current frontmost window as the most-recent window.
         if let wid = frontmostWindowID(ofPID: pid) { stampWindow(wid) }
-        scheduleRefresh(after: 0.1)
+        scheduleRefresh(pid: pid, after: 0.1)
     }
 
     /// Record that a specific window just became frontmost.
@@ -259,23 +314,36 @@ final class WindowEnumerator: @unchecked Sendable {
     /// minimize needs AX, and only for the app you just acted on, which is
     /// frontmost and awake — one cheap round trip.
     ///
-    /// Costs a few milliseconds, so it runs on every summon.
+    /// Costs a few milliseconds, so it runs on every summon — and the one AX
+    /// round trip is capped by `reconcileTimeout`, so a busy frontmost app
+    /// cannot hold the panel; the snapshot then stands as it was.
     private func reconcile(_ snap: Snapshot) -> Snapshot {
         let selfPID = ProcessInfo.processInfo.processIdentifier
         let facts = windowFacts(resolvingSpaces: false)
         let currentSpace = WindowAssembly.currentSpace(facts)
         let live = Set(facts.map(\.id))
 
+        // Hidden flags from the metadata cache (a hide/unhide refreshes its
+        // app at once), minus apps that have quit. Not from
+        // `runningApplications`: walking it is ~20 ms of LaunchServices round
+        // trips, and this is the summon path. Only a frontmost app launched
+        // since the last pass is read live — one app.
+        lock.lock()
+        let cachedMetas = metaCache
+        lock.unlock()
         var hiddenByPID: [pid_t: Bool] = [:]
-        for app in NSWorkspace.shared.runningApplications where !app.isTerminated {
-            hiddenByPID[app.processIdentifier] = app.isHidden
-        }
+        for case let (pid, meta?) in cachedMetas where Self.isAlive(pid) { hiddenByPID[pid] = meta.isHidden }
 
         let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        if let frontPID, frontPID != selfPID, hiddenByPID[frontPID] == nil,
+           let app = NSRunningApplication(processIdentifier: frontPID),
+           app.activationPolicy != .prohibited, !app.isTerminated {
+            hiddenByPID[frontPID] = app.isHidden
+        }
         var frontWindows: [CGWindowID: ScannedWindow] = [:]
         var frontIsAuthoritative = false
         if let frontPID, frontPID != selfPID, hiddenByPID[frontPID] != nil {
-            let scan = Self.scanApp(pid: frontPID, timeout: foregroundTimeout)
+            let scan = Self.scanApp(pid: frontPID, timeout: reconcileTimeout)
             frontIsAuthoritative = scan.responded
             for window in scan.windows where window.wid != nil {
                 frontWindows[window.wid!] = window
@@ -443,9 +511,25 @@ final class WindowEnumerator: @unchecked Sendable {
     // MARK: - Refresh scheduling
 
     /// Coalesced background refresh. Several callers (AX notifications, app
-    /// activation, the summon path) ask for one at once; only one scan runs.
+    /// activation, the summon path) ask for one at once; only one scan runs,
+    /// covering the union of what they asked for — one app, a few, or all.
     @MainActor private func scheduleRefresh(after delay: TimeInterval) {
+        scheduleRefresh(.all, after: delay)
+    }
+
+    /// A refresh of `pid` alone (see `rescan`).
+    @MainActor private func scheduleRefresh(pid: pid_t, after delay: TimeInterval) {
+        scheduleRefresh(.apps([pid]), after: delay)
+    }
+
+    /// `app` alone — or everything, when a notification named no app.
+    @MainActor private func scheduleRefresh(app: NSRunningApplication?, after delay: TimeInterval) {
+        scheduleRefresh(app.map { RefreshScope.apps([$0.processIdentifier]) } ?? .all, after: delay)
+    }
+
+    @MainActor private func scheduleRefresh(_ scope: RefreshScope, after delay: TimeInterval) {
         guard started, !suspended else { return }
+        pendingScope.merge(scope)
         // A chatty app (title changes while you type) would otherwise push the
         // pending refresh out forever. Once a request has waited this long, let
         // it run instead of rescheduling it again.
@@ -465,7 +549,7 @@ final class WindowEnumerator: @unchecked Sendable {
 
     @MainActor private func refreshIfStale() {
         lock.lock()
-        let age = snapshot.map { Date().timeIntervalSince($0.takenAt) } ?? .greatestFiniteMagnitude
+        let age = fullScanAt.map { Date().timeIntervalSince($0) } ?? .greatestFiniteMagnitude
         lock.unlock()
         if age >= refreshInterval { scheduleRefresh(after: 0) }
     }
@@ -473,23 +557,27 @@ final class WindowEnumerator: @unchecked Sendable {
     @MainActor private func runRefresh() {
         pendingRefresh = nil
         refreshRequestedAt = nil
-        guard !suspended else { return }
+        let scope = pendingScope
+        pendingScope = .none
+        guard !suspended, scope != .none else { return }
         // A notification that lands *during* a scan describes state that scan
         // may already have read past, so remember it and run again rather than
         // dropping the request on the floor.
-        guard !refreshInFlight else { refreshAgain = true; return }
+        guard !refreshInFlight else { refreshAgainScope.merge(scope); return }
         refreshInFlight = true
         cacheSelfWindows()
         scanQueue.async { [weak self] in
             guard let self else { return }
-            _ = self.performScan(timeout: self.backgroundTimeout)
+            switch scope {
+            case .all, .none: self.performScan(timeout: self.backgroundTimeout)
+            case let .apps(pids): self.rescan(pids, timeout: self.backgroundTimeout)
+            }
             DispatchQueue.main.async {
                 self.refreshInFlight = false
                 NotificationCenter.default.post(name: Self.didRefresh, object: self)
-                if self.refreshAgain {
-                    self.refreshAgain = false
-                    self.scheduleRefresh(after: 0)
-                }
+                let again = self.refreshAgainScope
+                self.refreshAgainScope = .none
+                if again != .none { self.scheduleRefresh(again, after: 0) }
             }
         }
     }
@@ -500,21 +588,93 @@ final class WindowEnumerator: @unchecked Sendable {
     /// and returns it. Safe to call from any thread.
     @discardableResult
     private func performScan(timeout: TimeInterval) -> Snapshot {
-        let selfPID = ProcessInfo.processInfo.processIdentifier
         let facts = windowFacts()
-        let metas = NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy != .prohibited && !$0.isTerminated }
-            .map {
-                AppMeta(pid: $0.processIdentifier,
-                        bundleID: $0.bundleIdentifier,
-                        name: $0.localizedName ?? "Unknown",
-                        icon: icon(for: $0),
-                        isHidden: $0.isHidden,
-                        isRegular: $0.activationPolicy == .regular)
-            }
-
+        let metas = runningMetas(refreshing: nil)
         let scans = scanApps(metas, timeout: timeout)
+        let snap = assembleSnapshot(facts: facts, metas: metas, scans: scans)
+        lock.lock()
+        fullScanAt = snap.takenAt
+        lock.unlock()
+        return snap
+    }
 
+    /// Asks `pids` again — one app's worth of AX round trips, typically — and
+    /// rebuilds the snapshot from fresh CGWindowList facts and every other
+    /// app's last answer. Before any full pass has run there is nothing to
+    /// reuse, so it runs one. Safe to call from any thread.
+    @discardableResult
+    private func rescan(_ pids: Set<pid_t>, timeout: TimeInterval) -> Snapshot {
+        lock.lock()
+        let previous = lastScans
+        lock.unlock()
+        guard !previous.isEmpty else { return performScan(timeout: timeout) }
+
+        let facts = windowFacts()
+        let metas = runningMetas(refreshing: pids)
+        let fresh = scanApps(metas.filter { pids.contains($0.pid) }, timeout: timeout)
+        // An app that quit drops out; one that just launched is in `fresh`.
+        let running = Set(metas.map(\.pid))
+        let scans = previous.filter { running.contains($0.key) }.merging(fresh) { _, new in new }
+        return assembleSnapshot(facts: facts, metas: metas, scans: scans)
+    }
+
+    /// The running apps as flat `AppMeta`s, icons from the cache, in pid
+    /// order (stable across passes, so rows don't shuffle under an open
+    /// panel). `refreshing` nil — the full pass — walks `runningApplications`
+    /// and reads every app afresh. A set — a rescan — reads just those apps
+    /// and takes the rest from `metaCache`, dropping pids that have died
+    /// (`isAlive`, no IPC). A hidden/unhidden app is always among the
+    /// refreshed (see `observeWorkspace`); an app launched since the last
+    /// full pass is picked up by its launch notification, or the next pass.
+    private func runningMetas(refreshing pids: Set<pid_t>?) -> [AppMeta] {
+        var fresh: [pid_t: AppMeta?] = [:]
+        func read(_ app: NSRunningApplication, pid: pid_t) {
+            guard app.activationPolicy != .prohibited, !app.isTerminated else {
+                fresh[pid] = .some(nil)
+                return
+            }
+            fresh[pid] = AppMeta(pid: pid,
+                                 bundleID: app.bundleIdentifier,
+                                 name: app.localizedName ?? "Unknown",
+                                 icon: icon(for: app),
+                                 isHidden: app.isHidden,
+                                 isRegular: app.activationPolicy == .regular)
+        }
+        if let pids {
+            lock.lock()
+            let cached = metaCache
+            lock.unlock()
+            for (pid, entry) in cached where !pids.contains(pid) && Self.isAlive(pid) { fresh[pid] = entry }
+            for pid in pids {
+                if let app = NSRunningApplication(processIdentifier: pid) { read(app, pid: pid) }
+            }
+        } else {
+            for app in NSWorkspace.shared.runningApplications { read(app, pid: app.processIdentifier) }
+        }
+        lock.lock()
+        metaCache = fresh
+        lock.unlock()
+        return fresh.keys.sorted().compactMap { fresh[$0] ?? nil }
+    }
+
+    /// Whether `pid` is still running: a signal probe, no IPC. Pid reuse is
+    /// covered by `didTerminateApplicationNotification` (`forget(pid:)`).
+    private static func isAlive(_ pid: pid_t) -> Bool {
+        kill(pid, 0) == 0 || errno == EPERM
+    }
+
+    /// An app quit: drop what the per-app caches know about its pid, before
+    /// a new process can reuse it.
+    @MainActor private func forget(pid: pid_t) {
+        lock.lock()
+        metaCache[pid] = nil
+        lastScans[pid] = nil
+        lock.unlock()
+    }
+
+    /// Classifies one pass's inputs and stores the result as the new snapshot.
+    private func assembleSnapshot(facts: [CGWindowFact], metas: [AppMeta], scans: [pid_t: AppScan]) -> Snapshot {
+        let selfPID = ProcessInfo.processInfo.processIdentifier
         lock.lock()
         let previous = caches
         let selfWindows = selfWindowsCache
@@ -540,6 +700,7 @@ final class WindowEnumerator: @unchecked Sendable {
         lock.lock()
         snapshot = snap
         caches = assembled.caches
+        lastScans = scans
         iconCache = iconCache.filter { running.contains($0.key) }
         lock.unlock()
 
@@ -597,7 +758,16 @@ final class WindowEnumerator: @unchecked Sendable {
 
         var windows: [ScannedWindow] = []
         for element in list {
+            // Each element carries its own timeout; set it rather than rely
+            // on the app element's being inherited.
+            AXUIElementSetMessagingTimeout(element, Float(timeout))
             let attrs = attributes(of: element)
+            if attrs.error == .cannotComplete {
+                // Timed out: the app is busy, and every window after this one
+                // would wait as long. Give up now, as a timeout on the windows
+                // list does, and let the caches and CGWindowList stand in.
+                return AppScan(windows: [], answered: false, responded: false)
+            }
             // Only standard windows; sheets, drawers and popovers are not
             // switch targets. A missing subrole is treated as standard.
             if let subrole = attrs.subrole, subrole != (kAXStandardWindowSubrole as String) { continue }
@@ -613,18 +783,18 @@ final class WindowEnumerator: @unchecked Sendable {
     /// than three. Cuts per-window IPC by two thirds, which is the second
     /// biggest term in scan latency after per-app parallelism.
     private static func attributes(of element: AXUIElement)
-        -> (subrole: String?, title: String?, minimized: Bool?) {
+        -> (subrole: String?, title: String?, minimized: Bool?, error: AXError) {
         let names = [kAXSubroleAttribute, kAXTitleAttribute, kAXMinimizedAttribute] as CFArray
         var values: CFArray?
-        guard AXUIElementCopyMultipleAttributeValues(element,
-                                                     names,
-                                                     AXCopyMultipleAttributeOptions(rawValue: 0),
-                                                     &values) == .success,
-              let array = values as? [AnyObject], array.count == 3
-        else { return (nil, nil, nil) }
+        let error = AXUIElementCopyMultipleAttributeValues(element,
+                                                           names,
+                                                           AXCopyMultipleAttributeOptions(rawValue: 0),
+                                                           &values)
+        guard error == .success, let array = values as? [AnyObject], array.count == 3
+        else { return (nil, nil, nil, error == .success ? .failure : error) }
         // Attributes the element does not support come back as an AXValue error
         // placeholder, which simply fails the casts below.
-        return (array[0] as? String, array[1] as? String, array[2] as? Bool)
+        return (array[0] as? String, array[1] as? String, array[2] as? Bool, .success)
     }
 
     // MARK: - CGWindowList
@@ -716,15 +886,20 @@ final class WindowEnumerator: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// Read once: each property is a LaunchServices round trip.
+    private static let selfApp: (pid: pid_t, bundleID: String?, name: String) = {
+        let app = NSRunningApplication.current
+        return (app.processIdentifier, app.bundleIdentifier, app.localizedName ?? "Wicher")
+    }()
+
     private func ownWindowRows(_ windows: [SelfWindow], currentSpace: Set<CGWindowID>) -> [WindowInfo] {
         guard !windows.isEmpty else { return [] }
-        let app = NSRunningApplication.current
-        let name = app.localizedName ?? "Wicher"
+        let app = Self.selfApp
         return windows.map { window in
-            WindowInfo(pid: app.processIdentifier,
-                       bundleID: app.bundleIdentifier,
-                       appName: name,
-                       appIcon: icon(for: app),
+            WindowInfo(pid: app.pid,
+                       bundleID: app.bundleID,
+                       appName: app.name,
+                       appIcon: icon(for: NSRunningApplication.current),
                        title: window.title,
                        axWindow: nil,               // activated in-process, see WindowActivator
                        isMinimized: window.minimized,
@@ -822,21 +997,25 @@ final class WindowEnumerator: @unchecked Sendable {
             this.scheduleRefresh(after: 0.1)
         }
         let center = NSWorkspace.shared.notificationCenter
-        let refreshing: [NSNotification.Name] = [
-            NSWorkspace.didHideApplicationNotification,
-            NSWorkspace.didUnhideApplicationNotification,
-            NSWorkspace.activeSpaceDidChangeNotification,
-        ]
-        for name in refreshing {
-            observe(name, on: center) { this, _ in this.scheduleRefresh(after: 0.1) }
+        // One app changed: ask that app alone. A Space change moves every
+        // app's windows on or off screen, and AX answers differ per Space,
+        // so that one is a full pass.
+        for name in [NSWorkspace.didHideApplicationNotification, NSWorkspace.didUnhideApplicationNotification] {
+            observe(name, on: center) { this, app in this.scheduleRefresh(app: app, after: 0) }
+        }
+        observe(NSWorkspace.activeSpaceDidChangeNotification, on: center) { this, _ in
+            this.scheduleRefresh(after: 0.1)
         }
         observe(NSWorkspace.didLaunchApplicationNotification, on: center) { this, app in
             if let app { this.installObservers(for: [app]) }
-            this.scheduleRefresh(after: 0.3)
+            this.scheduleRefresh(app: app, after: 0.3)
         }
         observe(NSWorkspace.didTerminateApplicationNotification, on: center) { this, app in
-            if let app { this.removeObserver(pid: app.processIdentifier) }
-            this.scheduleRefresh(after: 0.1)
+            if let app {
+                this.removeObserver(pid: app.processIdentifier)
+                this.forget(pid: app.processIdentifier)
+            }
+            this.scheduleRefresh(app: app, after: 0.1)
         }
         // Don't poke every app while the display is asleep.
         observe(NSWorkspace.screensDidSleepNotification, on: center) { this, _ in this.suspended = true }
@@ -864,22 +1043,41 @@ final class WindowEnumerator: @unchecked Sendable {
 
     private static let observerCallback: AXObserverCallback = { observer, element, notification, refcon in
         guard let refcon else { return }
-        // A new window: watch for it closing. The app has just made it, so it
-        // is awake and this round trip is cheap.
-        if (notification as String) == kAXWindowCreatedNotification {
-            observeDestruction(of: [element], with: observer, refcon: refcon)
-        }
         let enumerator = Unmanaged<WindowEnumerator>.fromOpaque(refcon).takeUnretainedValue()
+        // A new window: watch for it closing. Registering is a round trip to
+        // the app — awake, since it just made the window, but possibly busy —
+        // and this is the main thread, so it goes to the scan queue.
+        if (notification as String) == kAXWindowCreatedNotification {
+            let timeout = enumerator.backgroundTimeout
+            let refconBits = UInt(bitPattern: refcon)   // a raw pointer isn't Sendable; its bits are
+            enumerator.scanQueue.async {
+                guard let refcon = UnsafeMutableRawPointer(bitPattern: refconBits) else { return }
+                observeDestruction(of: [element], with: observer, refcon: refcon, timeout: timeout)
+            }
+        }
+        // The element names the app it belongs to, with no round trip, so
+        // only that app needs asking again.
+        var pid: pid_t = 0
+        let known = AXUIElementGetPid(element, &pid) == .success
         // The observer's run-loop source is on the main run loop.
-        MainActor.assumeIsolated { enumerator.scheduleRefresh(after: 0.15) }
+        MainActor.assumeIsolated {
+            if known {
+                enumerator.scheduleRefresh(pid: pid, after: 0.15)
+            } else {
+                enumerator.scheduleRefresh(after: 0.15)
+            }
+        }
     }
 
     /// Registers `kAXUIElementDestroyedNotification` on each window, so closing
-    /// one triggers a refresh. The registration dies with the window.
+    /// one triggers a refresh. The registration dies with the window. Each
+    /// registration is a round trip to the app, bounded by `timeout`.
     private static func observeDestruction(of windows: [AXUIElement],
                                            with observer: AXObserver,
-                                           refcon: UnsafeMutableRawPointer) {
+                                           refcon: UnsafeMutableRawPointer,
+                                           timeout: TimeInterval) {
         for window in windows {
+            AXUIElementSetMessagingTimeout(window, Float(timeout))
             AXObserverAddNotification(observer, window, kAXUIElementDestroyedNotification as CFString, refcon)
         }
     }
@@ -912,7 +1110,8 @@ final class WindowEnumerator: @unchecked Sendable {
                 var value: CFTypeRef?
                 if AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &value) == .success,
                    let windows = value as? [AXUIElement] {
-                    Self.observeDestruction(of: windows, with: observer, refcon: refcon)
+                    Self.observeDestruction(of: windows, with: observer, refcon: refcon,
+                                            timeout: self.backgroundTimeout)
                 }
                 DispatchQueue.main.async {
                     // The app may have quit while we were attaching; its

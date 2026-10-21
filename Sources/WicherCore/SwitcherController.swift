@@ -67,6 +67,32 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
 
     // MARK: - Entry points
 
+    /// Builds and lays out everything a first session would — row and cell
+    /// views, fonts, the glass, and the SwiftUI-hosted highlight — in the
+    /// hidden panel, so the first ⌥Tab after launch costs what the second
+    /// does. SwiftUI's first hosting view alone is tens of milliseconds, and
+    /// that bill otherwise lands between the hot key and the panel.
+    func warmUp() {
+        guard session == nil else { return }
+        let icon = NSApp.applicationIconImage
+        let sample = (0..<2).map {
+            WindowInfo(pid: 0, bundleID: nil, appName: "Wicher", appIcon: icon, title: "Warm-up \($0)",
+                       axWindow: nil, isMinimized: false, isAppHidden: false)
+        }
+        let rows: [DisplayRow] = [.item(sample[0], []), .separator, .item(sample[1], [], note: "Minimized")]
+        let screen = NSScreen.main?.frame.size ?? CGSize(width: 1440, height: 900)
+        for view in [listView, gridView] as [SwitcherContentView] {
+            panel.contentView = view
+            view.beginSession(screenSize: screen)
+            view.render(rows)
+            panel.setFrame(NSRect(origin: .zero, size: view.preferredWindowSize), display: false)
+            view.highlight(rowIndex: 0)
+            view.layoutSubtreeIfNeeded()
+            view.clear()
+        }
+        panel.contentView = contentView
+    }
+
     /// Menu entry point: open the switcher (no hold behavior).
     func summon(profile: SwitcherProfile, forward: Bool) {
         if session != nil {

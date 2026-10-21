@@ -24,6 +24,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         switcher.onOpenSettings = { [weak self] in self?.settings.show() }
         SystemHotKeyOverride.shared.recoverAndInstallSignalHandlers()
         WindowEnumerator.shared.start()
+        switcher.warmUp()
         observeAppActivation()
         observeSettings()
         registerHotKeys()
