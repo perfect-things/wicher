@@ -145,9 +145,18 @@ final class SwitcherSessionTests: XCTestCase {
         XCTAssertEqual(labels(s), ["x1"])
     }
 
-    func testSearchRespectsVisibleSpaces() {
-        let p = profile(spaces: .visibleSpaces)
+    func testSearchRespectsHiddenOtherSpaces() {
+        let p = profile(otherSpaces: .hide)
         var s = session([window("x1"), window("x2", onCurrentSpace: false)], profile: p)
+        s.appendToQuery("x")
+        XCTAssertEqual(labels(s), ["x1"])
+    }
+
+    func testSearchRespectsHiddenOtherDisplays() {
+        let e = enumeration([window("x1", wid: 1), window("x2", wid: 2)],
+                            frames: [1: CGRect(x: 10, y: 10, width: 500, height: 400), 2: rightDisplayFrame])
+        var s = SwitcherSession(profile: profile(otherDisplays: .hide), enumeration: e,
+                                activeAppPID: nil, display: twoDisplays, forward: true)
         s.appendToQuery("x")
         XCTAssertEqual(labels(s), ["x1"])
     }

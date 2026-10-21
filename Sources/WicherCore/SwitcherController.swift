@@ -117,6 +117,7 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
         session = SwitcherSession(profile: profile,
                                   enumeration: WindowEnumerator.shared.enumerate(),
                                   activeAppPID: activeAppPID,
+                                  display: displayLayout(),
                                   forward: forward)
         contentView.setQuery("")
         // Without Accessibility trust, every row comes from the CGWindowList
@@ -353,6 +354,17 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
 
     private var screenFrame: NSRect {
         sessionScreen?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+    }
+
+    /// Every display's bounds in CG global coordinates — the ones CGWindowList
+    /// bounds use, so no flipping from `NSScreen` frames — and the session's.
+    private func displayLayout() -> DisplayLayout? {
+        func bounds(_ screen: NSScreen) -> CGRect? {
+            let key = NSDeviceDescriptionKey("NSScreenNumber")
+            return (screen.deviceDescription[key] as? NSNumber).map { CGDisplayBounds($0.uint32Value) }
+        }
+        guard let sessionScreen, let current = bounds(sessionScreen) else { return nil }
+        return DisplayLayout(displays: NSScreen.screens.compactMap(bounds), current: current)
     }
 
     private func screenWithMouse() -> NSScreen? {

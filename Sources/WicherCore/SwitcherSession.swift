@@ -15,6 +15,8 @@ enum DisplayRow {
 struct SwitcherSession {
     let profile: SwitcherProfile
     let activeAppPID: pid_t?
+    /// Where the switcher opened, for the "other displays" placement.
+    let display: DisplayLayout?
     private var enumeration: Enumeration
 
     private(set) var query = ""
@@ -25,10 +27,12 @@ struct SwitcherSession {
     /// Preselects index 1 going forward (the previous window), so a quick
     /// tap+release switches back without the panel ever being drawn; going
     /// backward preselects the last row.
-    init(profile: SwitcherProfile, enumeration: Enumeration, activeAppPID: pid_t?, forward: Bool) {
+    init(profile: SwitcherProfile, enumeration: Enumeration, activeAppPID: pid_t?,
+         display: DisplayLayout? = nil, forward: Bool) {
         self.profile = profile
         self.enumeration = enumeration
         self.activeAppPID = activeAppPID
+        self.display = display
         rebuildRows()
         let count = selectableIndexes.count
         selectionPos = forward ? min(1, max(count - 1, 0)) : max(count - 1, 0)
@@ -143,20 +147,16 @@ struct SwitcherSession {
         if query.isEmpty {
             let sections = WindowGrouping.sections(for: profile,
                                                    enumeration: enumeration,
-                                                   activeAppPID: activeAppPID)
+                                                   activeAppPID: activeAppPID,
+                                                   display: display)
             for section in sections {
                 if let title = section.title { rows.append(.header(title)) }
                 for info in section.items { rows.append(.item(info, [])) }
             }
         } else {
             // Search mode: a single flat, scored list (no section headers).
-            var pool = enumeration.windows
-            if profile.scope == .activeApp, let pid = activeAppPID {
-                pool = pool.filter { $0.pid == pid }
-            }
-            if profile.spaces == .visibleSpaces {
-                pool = pool.filter { $0.onCurrentSpace }
-            }
+            let pool = WindowGrouping.searchPool(for: profile, enumeration: enumeration,
+                                                 activeAppPID: activeAppPID, display: display)
             var scored: [(info: WindowInfo, ranges: [NSRange], score: Int)] = []
             for w in pool {
                 if let r = FuzzyMatcher.match(query: query, candidate: w.displayTitle) {

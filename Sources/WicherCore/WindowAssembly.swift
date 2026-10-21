@@ -27,6 +27,11 @@ struct CGWindowFact {
     /// both would otherwise pass for a window on another Space. Only resolved
     /// for off-screen windows during a full scan (see `SpacesPrivate`).
     var isOrderedOut = false
+    /// Top-left corner in global display coordinates (origin at the top left
+    /// of the main display, y down), as `kCGWindowBounds` reports it.
+    var origin = CGPoint.zero
+
+    var bounds: CGRect { CGRect(origin: origin, size: size) }
 
     /// Could plausibly be a user-facing window.
     ///
@@ -103,6 +108,7 @@ struct AssembledScan {
     let windows: [WindowInfo]
     let appsWithoutWindows: [WindowInfo]
     let currentSpaceWindowIDs: Set<CGWindowID>
+    let windowFrames: [CGWindowID: CGRect]
     /// Already pruned to windows that still exist.
     let caches: WindowCaches
 }
@@ -111,6 +117,13 @@ enum WindowAssembly {
     /// Layer-0 windows on screen right now — i.e. on the current Space.
     static func currentSpace(_ facts: [CGWindowFact]) -> Set<CGWindowID> {
         Set(facts.filter { $0.layer == 0 && $0.isOnscreen }.map(\.id))
+    }
+
+    /// Layer-0 window bounds, for telling which display a window is on.
+    static func windowFrames(_ facts: [CGWindowFact]) -> [CGWindowID: CGRect] {
+        var frames: [CGWindowID: CGRect] = [:]
+        for fact in facts where fact.layer == 0 && frames[fact.id] == nil { frames[fact.id] = fact.bounds }
+        return frames
     }
 
     /// Turns one scan's raw inputs into rows.
@@ -256,6 +269,7 @@ enum WindowAssembly {
         return AssembledScan(windows: windows,
                              appsWithoutWindows: appsWithoutWindows,
                              currentSpaceWindowIDs: currentSpace,
+                             windowFrames: windowFrames(facts),
                              caches: caches.pruned(to: liveIDs))
     }
 

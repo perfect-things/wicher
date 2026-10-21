@@ -13,20 +13,8 @@ enum WindowScope: Int, Codable, CaseIterable {
     }
 }
 
-/// Which Spaces a switcher profile includes.
-enum SpaceScope: Int, Codable, CaseIterable {
-    case allSpaces = 0
-    case visibleSpaces = 1
-
-    var title: String {
-        switch self {
-        case .allSpaces: return "All Spaces"
-        case .visibleSpaces: return "Visible Spaces"
-        }
-    }
-}
-
-/// How a category of windows (minimized / hidden / app-only) is placed.
+/// How a category of windows (other display / other Space / minimized /
+/// hidden / app-only) is placed.
 enum Placement: Int, Codable, CaseIterable {
     case show = 0        // merged into the main list
     case showAtBottom = 1 // its own section at the bottom
@@ -35,8 +23,8 @@ enum Placement: Int, Codable, CaseIterable {
     var title: String {
         switch self {
         case .show: return "Show"
-        case .showAtBottom: return "Show at bottom"
-        case .hide: return "Do not show"
+        case .showAtBottom: return "At bottom"
+        case .hide: return "Hide"
         }
     }
 }
@@ -63,7 +51,11 @@ struct SwitcherProfile: Codable, Identifiable, Equatable {
     var keyCode: UInt32
     var carbonModifiers: UInt32
     var scope: WindowScope
-    var spaces: SpaceScope
+    /// Windows on the current Space of a display other than the one the
+    /// switcher opens on.
+    var otherDisplays: Placement
+    /// Windows on no display's current Space.
+    var otherSpaces: Placement
     var minimized: Placement
     var hidden: Placement
     var appsWithoutWindows: Placement
@@ -81,7 +73,8 @@ struct SwitcherProfile: Codable, Identifiable, Equatable {
                             keyCode: HotKeyCombo.defaultCombo.keyCode,
                             carbonModifiers: HotKeyCombo.defaultCombo.carbonModifiers,
                             scope: .allApps,
-                            spaces: .allSpaces,
+                            otherDisplays: .show,
+                            otherSpaces: .show,
                             minimized: .showAtBottom,
                             hidden: .showAtBottom,
                             appsWithoutWindows: .showAtBottom),
@@ -90,7 +83,8 @@ struct SwitcherProfile: Codable, Identifiable, Equatable {
                             keyCode: HotKeyCombo.currentAppCombo.keyCode,
                             carbonModifiers: HotKeyCombo.currentAppCombo.carbonModifiers,
                             scope: .activeApp,
-                            spaces: .allSpaces,
+                            otherDisplays: .show,
+                            otherSpaces: .show,
                             minimized: .showAtBottom,
                             hidden: .hide,
                             appsWithoutWindows: .hide),

@@ -8,8 +8,12 @@ struct Enumeration {
     let windows: [WindowInfo]
     let appsWithoutWindows: [WindowInfo]
     let currentSpaceWindowIDs: Set<CGWindowID>
+    /// Window bounds by id, in global display coordinates (see `CGWindowFact.origin`).
+    let windowFrames: [CGWindowID: CGRect]
 
-    static var empty: Enumeration { Enumeration(windows: [], appsWithoutWindows: [], currentSpaceWindowIDs: []) }
+    static var empty: Enumeration {
+        Enumeration(windows: [], appsWithoutWindows: [], currentSpaceWindowIDs: [], windowFrames: [:])
+    }
 }
 
 extension NSWindow {
@@ -40,6 +44,7 @@ private struct Snapshot {
     let windows: [WindowInfo]
     let appsWithoutWindows: [WindowInfo]
     let currentSpaceWindowIDs: Set<CGWindowID>
+    let windowFrames: [CGWindowID: CGRect]
     let takenAt: Date
 }
 
@@ -382,6 +387,7 @@ final class WindowEnumerator: @unchecked Sendable {
         return Snapshot(windows: windows,
                         appsWithoutWindows: appsWithoutWindows,
                         currentSpaceWindowIDs: currentSpace,
+                        windowFrames: WindowAssembly.windowFrames(facts),
                         takenAt: snap.takenAt)
     }
 
@@ -421,7 +427,8 @@ final class WindowEnumerator: @unchecked Sendable {
         let orderedApps = snap.appsWithoutWindows.sorted { mruRank($0.pid) < mruRank($1.pid) }
         return Enumeration(windows: ordered,
                            appsWithoutWindows: orderedApps,
-                           currentSpaceWindowIDs: snap.currentSpaceWindowIDs)
+                           currentSpaceWindowIDs: snap.currentSpaceWindowIDs,
+                           windowFrames: snap.windowFrames)
     }
 
     @MainActor private func mruRank(_ pid: pid_t) -> Int { mruPIDs.firstIndex(of: pid) ?? Int.max }
@@ -526,6 +533,7 @@ final class WindowEnumerator: @unchecked Sendable {
         let snap = Snapshot(windows: assembled.windows,
                             appsWithoutWindows: assembled.appsWithoutWindows,
                             currentSpaceWindowIDs: assembled.currentSpaceWindowIDs,
+                            windowFrames: assembled.windowFrames,
                             takenAt: Date())
 
         let running = Set(metas.map { $0.bundleID ?? "pid:\($0.pid)" })
@@ -639,18 +647,18 @@ final class WindowEnumerator: @unchecked Sendable {
                   let owner = info[kCGWindowOwnerPID as String] as? pid_t,
                   let layer = info[kCGWindowLayer as String] as? Int
             else { continue }
-            var size = CGSize.zero
-            if let bounds = info[kCGWindowBounds as String] as? NSDictionary,
-               let rect = CGRect(dictionaryRepresentation: bounds) {
-                size = rect.size
+            var rect = CGRect.zero
+            if let bounds = info[kCGWindowBounds as String] as? NSDictionary {
+                rect = CGRect(dictionaryRepresentation: bounds) ?? .zero
             }
             var fact = CGWindowFact(id: number,
                                     pid: owner,
                                     layer: layer,
                                     isOnscreen: (info[kCGWindowIsOnscreen as String] as? Bool) ?? false,
                                     order: index,
-                                    size: size,
-                                    alpha: (info[kCGWindowAlpha as String] as? Double) ?? 1)
+                                    size: rect.size,
+                                    alpha: (info[kCGWindowAlpha as String] as? Double) ?? 1,
+                                    origin: rect.origin)
             if resolvingSpaces, !fact.isOnscreen, fact.isPlausibleWindow {
                 fact.isOrderedOut = SpacesPrivate.isInAnySpace(number) == false
             }
@@ -792,7 +800,7 @@ final class WindowEnumerator: @unchecked Sendable {
             let axIDs = Set(scan.windows.compactMap(\.wid))
             for fact in (byPID[pid] ?? []) where fact.layer == 0 && !axIDs.contains(fact.id) {
                 out += "    CG-only wid=\(fact.id) on=\(fact.isOnscreen) "
-                out += "size=\(Int(fact.size.width))x\(Int(fact.size.height)) alpha=\(fact.alpha) "
+                out += "origin=\(Int(fact.origin.x)),\(Int(fact.origin.y)) size=\(Int(fact.size.width))x\(Int(fact.size.height)) alpha=\(fact.alpha) "
                 out += "plausible=\(fact.isPlausibleWindow) orderedOut=\(fact.isOrderedOut)\n"
             }
         }

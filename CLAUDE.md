@@ -119,9 +119,15 @@ database. Flow of one switch:
    **Copy Diagnostics** dump (`diagnosticsReport()`, Settings → General). The decision of which rows
    exist is **`WindowAssembly.assemble`** — pure, tested; put classification changes
    there, with a test.
-5. **`WindowGrouping`** — pure function: `(profile, Enumeration, activePID) → [WindowSection]`.
+5. **`WindowGrouping`** — pure function: `(profile, Enumeration, activePID, DisplayLayout?) → [WindowSection]`.
    Put filtering/ordering policy here, not in the controller; it is the one piece that is
-   trivially reasonable about in isolation.
+   trivially reasonable about in isolation. Each window falls in one category — minimized,
+   else hidden app, else other Space (`!onCurrentSpace`), else other display — and each
+   category has a per-profile `Placement` (show / at bottom / hide). "Other display" means
+   most of its CGWindowList bounds (`Enumeration.windowFrames`, refreshed by `reconcile`)
+   lie on a display other than the one the session opened on (`DisplayLayout`, in CG
+   global coordinates — `CGDisplayBounds`, no `NSScreen` flip). A display's current Space
+   is on screen, so "other Spaces" never includes another display's visible windows.
 6. **`WindowActivator`** — activate, then raise; a minimized window is un-minimized by
    `DeminiaturizeWaiter`, which raises on `kAXWindowDeminiaturizedNotification` (0.6 s
    timeout). App-only entries get a Dock-click-equivalent reopen.
@@ -138,7 +144,7 @@ views, and without it AppKit's key-view loop is computed for the first pane only
 others Tab/Shift-Tab skipped controls or never got back to the sidebar.
 
 Config: `Settings` (UserDefaults, loaded once in `init`; globals) + `SwitcherProfile`
-(Codable, JSON-encoded into UserDefaults; per-switcher scope/Spaces/placement +
+(Codable, JSON-encoded into UserDefaults; per-switcher layout/scope/placements +
 shortcut). `Settings` is `@Observable`; every `didSet` clamps and persists, only when
 the value really changed. There is no change notification: AppKit code watches what it
 needs with `Settings.observe` (an `Observations` loop, delivered on a later main-loop

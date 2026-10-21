@@ -103,7 +103,7 @@ final class SettingsModel {
             SwitcherProfile(id: UUID(), name: "Switcher \(all.count + 1)",
                             keyCode: HotKeyCombo.defaultCombo.keyCode,
                             carbonModifiers: HotKeyCombo.defaultCombo.carbonModifiers,
-                            scope: .activeApp, spaces: .allSpaces,
+                            scope: .activeApp, otherDisplays: .show, otherSpaces: .show,
                             minimized: .showAtBottom, hidden: .hide, appsWithoutWindows: .hide),
         ]
     }

@@ -214,10 +214,13 @@ private struct SwitchersPane: View {
     var body: some View {
         Form {
             ForEach(settings.profiles.enumerated(), id: \.element.id) { index, profile in
+                // By id, not by index: the binding must survive Remove Switcher.
+                let binding = $settings[profileID: profile.id]
+                // One box per switcher, so its rows read as belonging together.
                 Section {
-                    // By id, not by index: the binding must survive Remove Switcher.
-                    ProfileRows(model: model, profile: $settings[profileID: profile.id],
-                                isRemovable: settings.profiles.count > 1)
+                    ProfileRows(model: model, profile: binding)
+                    PlacementRows(model: model, profile: binding,
+                                  isRemovable: settings.profiles.count > 1)
                 } header: {
                     if index == 0 { header }
                 }
@@ -251,7 +254,6 @@ private struct SwitchersPane: View {
 private struct ProfileRows: View {
     let model: SettingsModel
     @Binding var profile: SwitcherProfile
-    let isRemovable: Bool
 
     var body: some View {
         LabeledContent {
@@ -262,12 +264,28 @@ private struct ProfileRows: View {
         } label: {
             SettingLabel("Shortcut", hint: model.shortcutNotes[profile.id] ?? "")
         }
-        enumPicker("Layout", $profile.layout) { $0.title }
-        enumPicker("Show windows of", $profile.scope) { $0.title }
-        enumPicker("Show windows from", $profile.spaces) { $0.title }
-        enumPicker("Minimized windows", $profile.minimized) { $0.title }
-        enumPicker("Hidden windows", $profile.hidden) { $0.title }
-        enumPicker("Apps without windows", $profile.appsWithoutWindows) { $0.title }
+        SegmentedPicker("Layout", selection: $profile.layout) { $0.title }
+        SegmentedPicker("Show windows of", selection: $profile.scope) { $0.title }
+    }
+}
+
+/// Where each category of window goes: in the list, in a section at the
+/// bottom, or nowhere.
+private struct PlacementRows: View {
+    let model: SettingsModel
+    @Binding var profile: SwitcherProfile
+    let isRemovable: Bool
+
+    var body: some View {
+        SegmentedPicker("On other displays", hint: "Not on the display the switcher opens on",
+                        selection: $profile.otherDisplays) { $0.title }
+        SegmentedPicker("On other Spaces", hint: "Not on any display’s current Space",
+                        selection: $profile.otherSpaces) { $0.title }
+        SegmentedPicker("Minimized", hint: "In the Dock", selection: $profile.minimized) { $0.title }
+        SegmentedPicker("Of hidden apps", hint: "Apps hidden with ⌘H",
+                        selection: $profile.hidden) { $0.title }
+        SegmentedPicker("Apps without windows", hint: "Running, nothing open",
+                        selection: $profile.appsWithoutWindows) { $0.title }
         if isRemovable {
             HStack {
                 Spacer()
@@ -277,12 +295,36 @@ private struct ProfileRows: View {
             }
         }
     }
+}
 
-    private func enumPicker<E: CaseIterable & Hashable>(_ title: String, _ selection: Binding<E>,
-                                                        _ label: @escaping (E) -> String) -> some View
-    where E.AllCases: RandomAccessCollection {
-        Picker(title, selection: selection) {
-            ForEach(E.allCases, id: \.self) { Text(label($0)).tag($0) }
+/// A segmented control over every case of an enum, sized to its segments
+/// rather than stretched across the row.
+private struct SegmentedPicker<E: CaseIterable & Hashable>: View where E.AllCases: RandomAccessCollection {
+    let title: String
+    var hint: String?
+    @Binding var selection: E
+    let label: (E) -> String
+
+    init(_ title: String, hint: String? = nil, selection: Binding<E>, label: @escaping (E) -> String) {
+        self.title = title
+        self.hint = hint
+        self._selection = selection
+        self.label = label
+    }
+
+    var body: some View {
+        // LabeledContent, like the Shortcut row: a bare segmented Picker sits
+        // short of the trailing edge, and a long hint pushes it onto a line
+        // of its own.
+        LabeledContent {
+            Picker(title, selection: $selection) {
+                ForEach(E.allCases, id: \.self) { Text(label($0)).tag($0) }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .fixedSize()
+        } label: {
+            SettingLabel(title, hint: hint)
         }
     }
 }
