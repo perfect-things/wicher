@@ -1,6 +1,22 @@
+> [!CAUTION]
+> This is a vibe-coded app. 
+> You should not use it if you don't understand the risk!
+
+> [!NOTE]
+> I developed this for fun and personal use.
+> I will also not accept contributions, issues or feature requests.
+
+<hr>
+
 # wicher
 
 A tiny macOS **window switcher**: an ⌘Tab-style HUD that lists *windows*, not just apps, with type-to-search.
+
+<img src="Resources/list.png" alt="List view" width=600>
+<img src="Resources/icons.png" alt="Icons view" width=600>
+
+
+
 
 ## Install
 
