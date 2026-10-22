@@ -207,35 +207,31 @@ private struct SwitchersPane: View {
                 let binding = $settings[profileID: profile.id]
                 // One box per switcher, so its rows read as belonging together.
                 Section {
-                    ProfileRows(model: model, profile: binding)
-                    PlacementRows(model: model, profile: binding,
-                                  isRemovable: settings.profiles.count > 1)
+                    ProfileRows(model: model, profile: binding, isRemovable: index > 0)
+                    PlacementRows(model: model, profile: binding)
                 } header: {
-                    if index == 0 { header }
+                    if index == 0 && !model.accessibilityTrusted { accessibilityWarning }
+                } footer: {
+                    if index == settings.profiles.count - 1 { addButton.padding(.top, 8) }
                 }
             }
         }
         .formStyle(.grouped)
+        // With no header above it, the first box starts level with the sidebar's first row.
+        .contentMargins(.top, -5, for: .scrollContent)
     }
 
-    private var header: some View {
-        HStack {
-            Text("Each switcher has its own shortcut and decides which windows it lists.")
-                .font(.callout.weight(.regular))
-                .foregroundStyle(.secondary)
-            Spacer()
-            // A Label, not a bare Image, so VoiceOver reads "Add Switcher";
-            // the circle is inside the label so all of it is clickable.
-            Button(action: model.addProfile) {
-                Label("Add Switcher", systemImage: "plus")
-                    .labelStyle(.iconOnly)
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 30, height: 30)
-                    .background(Circle().fill(Color.primary.opacity(0.1)))
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .help("Add Switcher")
+    /// Once for all switchers, rather than beside every shortcut.
+    private var accessibilityWarning: some View {
+        Text("⚠︎ Accessibility access is off, so macOS shortcuts such as ⌘Tab cannot be replaced. Turn Wicher on in System Settings → Privacy & Security → Accessibility.")
+            .font(.callout.weight(.regular))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var addButton: some View {
+        Button(action: model.addProfile) {
+            Label("Add Switcher", systemImage: "plus")
         }
     }
 }
@@ -243,42 +239,91 @@ private struct SwitchersPane: View {
 private struct ProfileRows: View {
     let model: SettingsModel
     @Binding var profile: SwitcherProfile
+    let isRemovable: Bool
 
     var body: some View {
-        LabeledContent {
+        HStack(spacing: 10) {
             ShortcutField(combo: profile.combo,
                           validate: { [id = profile.id] in model.problem(with: $0, for: id) },
                           onChange: { [id = profile.id] in Settings.shared[profileID: id].combo = $0 },
                           onRecordingChanged: { _ in model.refreshShortcutNotes() })
-        } label: {
-            SettingLabel("Shortcut", hint: model.shortcutNotes[profile.id] ?? "")
+            if let note = model.shortcutNotes[profile.id], !note.isEmpty {
+                Text(note)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            Picker("Layout", selection: $profile.layout) {
+                ForEach(SwitcherLayout.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .fixedSize()
+            if isRemovable {
+                Button { model.removeProfile(profile.id) } label: {
+                    Label("Remove Switcher", systemImage: "trash").labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .help("Remove Switcher")
+            }
         }
-        SegmentedPicker("Layout", selection: $profile.layout) { $0.title }
+        .padding(.vertical, 2)
         SegmentedPicker("Show windows of", selection: $profile.scope) { $0.title }
     }
 }
 
 /// Where each category of window goes: in the list, in the group at the
-/// bottom, or nowhere.
+/// bottom, or nowhere — behind a disclosure that sums them up while closed.
 private struct PlacementRows: View {
     let model: SettingsModel
     @Binding var profile: SwitcherProfile
-    let isRemovable: Bool
 
     var body: some View {
-        SegmentedPicker("On other displays", selection: $profile.otherDisplays) { $0.title }
-        SegmentedPicker("On other Spaces", selection: $profile.otherSpaces) { $0.title }
-        SegmentedPicker("Minimized", selection: $profile.minimized) { $0.title }
-        SegmentedPicker("Of hidden apps", selection: $profile.hidden) { $0.title }
-        SegmentedPicker("Apps without windows", selection: $profile.appsWithoutWindows) { $0.title }
-        if isRemovable {
-            HStack {
+        // A row of its own rather than a DisclosureGroup: in a grouped Form
+        // that packs its rows without dividers and clips the first control.
+        Button { isExpanded.wrappedValue.toggle() } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
+                Text("Window placement")
                 Spacer()
-                Button(role: .destructive) { model.removeProfile(profile.id) } label: {
-                    Text("Remove Switcher").foregroundStyle(.red)
+                if !isExpanded.wrappedValue {
+                    Text(summary).foregroundStyle(.secondary)
                 }
             }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityValue(isExpanded.wrappedValue ? "Expanded" : "Collapsed")
+        if isExpanded.wrappedValue {
+            Group {
+                SegmentedPicker("On other displays", selection: $profile.otherDisplays) { $0.title }
+                SegmentedPicker("On other Spaces", selection: $profile.otherSpaces) { $0.title }
+                SegmentedPicker("Minimized", selection: $profile.minimized) { $0.title }
+                SegmentedPicker("Of hidden apps", selection: $profile.hidden) { $0.title }
+                SegmentedPicker("Apps without windows", selection: $profile.appsWithoutWindows) { $0.title }
+            }
+            .padding(.leading, 18)
+        }
+    }
+
+    private var isExpanded: Binding<Bool> {
+        let id = profile.id
+        return Binding(get: { model.expandedPlacements.contains(id) },
+                       set: { if $0 { model.expandedPlacements.insert(id) } else { model.expandedPlacements.remove(id) } })
+    }
+
+    /// "1 shown · 3 at bottom · 1 hidden", leaving out the empty ones.
+    private var summary: String {
+        let all = [profile.otherDisplays, profile.otherSpaces, profile.minimized,
+                   profile.hidden, profile.appsWithoutWindows]
+        return Placement.allCases.compactMap { placement in
+            let count = all.filter { $0 == placement }.count
+            return count == 0 ? nil : "\(count) \(placement.summaryTitle)"
+        }.joined(separator: " · ")
     }
 }
 
@@ -337,7 +382,7 @@ private struct ShortcutField: View {
     var body: some View {
         Group {
             let button = Button(action: recorder.toggleRecording) {
-                Text(recorder.title).frame(minWidth: 96)
+                Text(recorder.title).frame(minWidth: 72)
             }
             if recorder.isRecording { button.buttonStyle(.borderedProminent) } else { button.buttonStyle(.bordered) }
         }

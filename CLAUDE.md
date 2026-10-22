@@ -94,7 +94,7 @@ database. Flow of one switch:
      public `PushSymbolicHotKeyMode(kHIHotKeyModeAllDisabled)` (no-op without
      Accessibility trust) and private `CGSSetGlobalHotKeyOperatingMode` (connection-scoped,
      so it dies with the process). Without trust the ⌘Tab override likely won't work
-     either; the card says so. Validation is `HotKeyCombo.problem(amongOthers:)`: only bare
+     either; the Switchers pane says so. Validation is `HotKeyCombo.problem(amongOthers:)`: only bare
      typing keys and chords another switcher uses (incl. its reverse) are refused.
 3. **`SwitcherController`** — session lifecycle and wiring: show-delay, hold-to-repeat,
    event monitors, panel placement, commit. It drives two pieces:

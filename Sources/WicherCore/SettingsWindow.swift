@@ -65,6 +65,11 @@ final class SettingsWindow: NSObject {
 
         win.title = model.pane.title
         model.onPaneChange = { [weak win] pane in win?.title = pane.title }
+        // Disclosures don't outlast the window; the window itself does.
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: win,
+                                               queue: .main) { [model] _ in
+            MainActor.assumeIsolated { model.expandedPlacements = [] }
+        }
         window = win
     }
 }

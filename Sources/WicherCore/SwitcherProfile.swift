@@ -27,6 +27,15 @@ enum Placement: Int, Codable, CaseIterable {
         case .hide: return "Hide"
         }
     }
+
+    /// For a count of windows, as in "3 at bottom".
+    var summaryTitle: String {
+        switch self {
+        case .show: return "shown"
+        case .showAtBottom: return "at bottom"
+        case .hide: return "hidden"
+        }
+    }
 }
 
 /// How a switcher's panel presents its windows.
@@ -36,8 +45,8 @@ enum SwitcherLayout: Int, Codable, CaseIterable {
 
     var title: String {
         switch self {
-        case .list: return "List"
-        case .icons: return "Icons"
+        case .list: return "List view"
+        case .icons: return "Icons view"
         }
     }
 }

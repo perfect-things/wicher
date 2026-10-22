@@ -39,6 +39,11 @@ final class SettingsModel {
     /// `shortcutNote`s by profile id. Worked out here, not in `body`: each one
     /// reads the system shortcut table (≈13 ms).
     private(set) var shortcutNotes: [UUID: String] = [:]
+    /// `AXIsProcessTrusted()` as of the last `refreshShortcutNotes()`.
+    private(set) var accessibilityTrusted = true
+    /// Switchers whose Window placement is open. Not saved: closing the
+    /// window closes them all.
+    var expandedPlacements: Set<UUID> = []
     /// `SMAppService.mainApp.status`, cached: it is an XPC round trip (≈1.4 ms,
     /// 8 ms cold), and the toggle reads it on every render. See `refreshLoginItem()`.
     private(set) var loginItemStatus: SMAppService.Status = .notRegistered
@@ -119,24 +124,22 @@ final class SettingsModel {
         combo.problem(amongOthers: Settings.shared.profiles.filter { $0.id != id }.map(\.combo))
     }
 
-    /// Recomputes `shortcutNotes`. Call when what they depend on changes
+    /// Recomputes `shortcutNotes` and `accessibilityTrusted`. Call when what they depend on changes
     /// outside `Settings`: Accessibility trust changes, the window opens.
     func refreshShortcutNotes() {
         let profiles = Settings.shared.profiles
         let trusted = AXIsProcessTrusted()
+        if trusted != accessibilityTrusted { accessibilityTrusted = trusted }
         var notes: [UUID: String] = [:]
         for profile in profiles {
-            notes[profile.id] = Self.shortcutNote(for: profile.combo, trusted: trusted)
+            notes[profile.id] = Self.shortcutNote(for: profile.combo)
         }
         if notes != shortcutNotes { shortcutNotes = notes }
     }
 
     /// A shortcut's reverse, and how it commits.
-    private static func shortcutNote(for combo: HotKeyCombo, trusted: Bool) -> String {
+    private static func shortcutNote(for combo: HotKeyCombo) -> String {
         var notes: [String] = []
-        if !trusted {
-            notes.append("⚠︎ Accessibility access is off, so macOS shortcuts such as ⌘Tab cannot be replaced. Turn Wicher on in System Settings → Privacy & Security → Accessibility.")
-        }
         if let reverse = combo.reverse {
             notes.append("\(reverse.displayString) cycles backwards.")
         } else {
