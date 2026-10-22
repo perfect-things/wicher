@@ -120,27 +120,22 @@ final class SettingsModel {
     }
 
     /// Recomputes `shortcutNotes`. Call when what they depend on changes
-    /// outside `Settings`: recording starts or stops (the system shortcuts are
-    /// paused meanwhile), Accessibility trust changes, the window opens.
+    /// outside `Settings`: Accessibility trust changes, the window opens.
     func refreshShortcutNotes() {
         let profiles = Settings.shared.profiles
         let trusted = AXIsProcessTrusted()
-        let overridden = SystemHotKeyOverride.shared.overriddenShortcuts(for: profiles.map(\.combo))
         var notes: [UUID: String] = [:]
-        for (profile, name) in zip(profiles, overridden) {
-            notes[profile.id] = Self.shortcutNote(for: profile.combo, overriding: name, trusted: trusted)
+        for profile in profiles {
+            notes[profile.id] = Self.shortcutNote(for: profile.combo, trusted: trusted)
         }
         if notes != shortcutNotes { shortcutNotes = notes }
     }
 
-    /// What a shortcut stands in for, its reverse, and how it commits.
-    private static func shortcutNote(for combo: HotKeyCombo, overriding overridden: String?, trusted: Bool) -> String {
+    /// A shortcut's reverse, and how it commits.
+    private static func shortcutNote(for combo: HotKeyCombo, trusted: Bool) -> String {
         var notes: [String] = []
         if !trusted {
             notes.append("⚠︎ Accessibility access is off, so macOS shortcuts such as ⌘Tab cannot be replaced. Turn Wicher on in System Settings → Privacy & Security → Accessibility.")
-        }
-        if let name = overridden {
-            notes.append("Replaces \(name) while Wicher is running.")
         }
         if let reverse = combo.reverse {
             notes.append("\(reverse.displayString) cycles backwards.")

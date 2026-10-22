@@ -266,15 +266,11 @@ private struct PlacementRows: View {
     let isRemovable: Bool
 
     var body: some View {
-        SegmentedPicker("On other displays", hint: "Not on the display the switcher opens on",
-                        selection: $profile.otherDisplays) { $0.title }
-        SegmentedPicker("On other Spaces", hint: "Not on any display’s current Space",
-                        selection: $profile.otherSpaces) { $0.title }
-        SegmentedPicker("Minimized", hint: "In the Dock", selection: $profile.minimized) { $0.title }
-        SegmentedPicker("Of hidden apps", hint: "Apps hidden with ⌘H",
-                        selection: $profile.hidden) { $0.title }
-        SegmentedPicker("Apps without windows", hint: "Running, nothing open",
-                        selection: $profile.appsWithoutWindows) { $0.title }
+        SegmentedPicker("On other displays", selection: $profile.otherDisplays) { $0.title }
+        SegmentedPicker("On other Spaces", selection: $profile.otherSpaces) { $0.title }
+        SegmentedPicker("Minimized", selection: $profile.minimized) { $0.title }
+        SegmentedPicker("Of hidden apps", selection: $profile.hidden) { $0.title }
+        SegmentedPicker("Apps without windows", selection: $profile.appsWithoutWindows) { $0.title }
         if isRemovable {
             HStack {
                 Spacer()

@@ -36,14 +36,6 @@ enum SystemHotKeys {
 
     static var isAvailable: Bool { functions != nil }
 
-    /// Names for the system hot keys a switcher is likely to take over.
-    static let knownNames: [Int32: String] = [
-        1: "the macOS app switcher (⌘Tab)",
-        2: "the macOS app switcher (⌘⇧Tab)",
-        27: "“Move focus to next window”",
-        64: "Spotlight",
-    ]
-
     /// Symbolic hot key ids are small integers; this covers every one in use.
     private static let idRange: Range<Int32> = 0..<512
 
@@ -164,20 +156,6 @@ final class SystemHotKeyOverride {
         // Persist first, so a crash between the two leaves a record to undo.
         disabled = needed.sorted()
         for id in needed { SystemHotKeys.setEnabled(id, false) }
-    }
-
-    /// The macOS shortcut each of `combos` takes over (or already has),
-    /// described for the user, or nil where it does not collide with one.
-    /// Reads the system table once.
-    func overriddenShortcuts(for combos: [HotKeyCombo]) -> [String?] {
-        let enabled = combos.isEmpty ? [] : SystemHotKeys.enabledBindings()
-        let disabled = self.disabled
-        return combos.map { combo in
-            let ids = enabled.filter { SystemHotKeys.binding($0, matches: combo) }.map(\.id)
-                + disabled.filter { claims($0, combo) }
-            guard let id = ids.min() else { return nil }
-            return SystemHotKeys.knownNames[id] ?? "a macOS keyboard shortcut"
-        }
     }
 
     func restoreAll() {
