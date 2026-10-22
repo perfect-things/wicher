@@ -188,8 +188,8 @@ The panel background and the selection highlight are each a **`SurfaceView`**, d
 from a `SurfaceAppearance` (`Settings.backgroundSurface` / `highlightSurface`): Glass
 (`NSGlassEffectView` `.regular`: frosted), Clear glass (`.clear`: see-through), Blurred (`NSVisualEffectView`, `state = .active` — wicher is never
 the active app) or Solid, plus a tint color + opacity for Light and for Dark mode (Solid
-fills with the tint). The defaults (`.defaultBackground` / `.defaultHighlight`)
-reproduce the original look. The panel's content must be the glass's `contentView`, so a
+fills with the tint). The defaults are `.defaultBackground` (Clear glass) and
+`.defaultHighlight` (Glass). The panel's content must be the glass's `contentView`, so a
 style change re-parents `SurfaceView.content` into a new effect view. Glass doesn't
 render in an offscreen snapshot. Text stays readable via `TextContrast`: labels get
 an `appearance` override (aqua/darkAqua) when the tints they sit on come out the
