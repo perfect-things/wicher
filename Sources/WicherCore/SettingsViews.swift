@@ -167,35 +167,27 @@ private struct AppearancePane: View {
                             range: HUDMetrics.iconRange, unit: "pt")
                 ValueSlider(title: "Row padding", value: $settings.rowPadding,
                             range: HUDMetrics.paddingRange, unit: "pt")
-                ValueSlider(title: "Panel width",
-                            subtitle: "Relative to the width that suits the icon size.",
-                            value: $settings.panelWidthScale,
+                ValueSlider(title: "Panel width", value: $settings.panelWidthScale,
                             range: HUDMetrics.widthScaleRange, step: 5, unit: "%")
-                SettingToggle("Show app names",
-                              hint: "Off, each row is just the app icon and the window title.",
-                              isOn: $settings.showAppNames)
                 ValueSlider(title: "Text size", value: $settings.textSize,
                             range: HUDMetrics.textRange, unit: "pt")
+                SettingToggle("Show app names on the left", isOn: $settings.showAppNames)
             } header: {
                 Text("List")
             }
 
             Section {
                 ValueSlider(title: "Icon size",
-                            subtitle: "Icons shrink to fit when there are too many for the screen.",
+                            info: "Icons shrink to fit when there are too many for the screen.",
                             value: $settings.gridIconSize, range: IconGridLayout.iconRange, unit: "pt")
-                ValueSlider(title: "Icon padding",
-                            subtitle: "Space between an icon and the edge of its selection highlight.",
-                            value: $settings.gridIconPadding, range: IconGridLayout.paddingRange, unit: "pt")
+                ValueSlider(title: "Icon padding", value: $settings.gridIconPadding,
+                            range: IconGridLayout.paddingRange, unit: "pt")
                 ValueSlider(title: "Icon spacing", value: $settings.gridIconSpacing,
                             range: IconGridLayout.spacingRange, unit: "pt")
                 ValueSlider(title: "Text size", value: $settings.gridTextSize,
                             range: IconGridLayout.textRange, unit: "pt")
             } header: {
                 Text("Icons")
-            } footer: {
-                Text("Each switcher picks List or Icons in Switchers. Changes here apply the next time the switcher opens.")
-                    .font(.callout).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -556,6 +548,7 @@ final class CheckerColorWell: NSColorWell {
 private struct ValueSlider: View {
     let title: String
     var subtitle: String?
+    var info: String?
     @Binding var value: Int
     let range: ClosedRange<Int>
     var step = 1
@@ -575,7 +568,7 @@ private struct ValueSlider: View {
                     .frame(width: 52, alignment: .trailing)
             }
         } label: {
-            SettingLabel(title, hint: subtitle)
+            SettingLabel(title, hint: subtitle, info: info)
         }
     }
 }
@@ -594,19 +587,25 @@ private extension Int {
 }
 
 /// A setting's title with an optional hint under it — spaced and leaded more
-/// generously than a grouped Form's built-in subtitle.
+/// generously than a grouped Form's built-in subtitle — and an optional info
+/// button beside it for text that shouldn't take up a line.
 private struct SettingLabel: View {
     let title: String
     let hint: String?
+    let info: String?
 
-    init(_ title: String, hint: String? = nil) {
+    init(_ title: String, hint: String? = nil, info: String? = nil) {
         self.title = title
         self.hint = hint
+        self.info = info
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(title)
+            HStack(spacing: 4) {
+                Text(title)
+                if let info { InfoButton(text: info) }
+            }
             if let hint {
                 Text(hint)
                     .font(.callout)
@@ -616,6 +615,30 @@ private struct SettingLabel: View {
             }
         }
         .padding(.vertical, hint == nil ? 0 : 2)
+    }
+}
+
+/// An ⓘ that shows `text` as a tooltip on hover, and in a popover when
+/// clicked or pressed with Space (a tooltip can't be opened from the
+/// keyboard). VoiceOver reads the text as the button's help.
+private struct InfoButton: View {
+    let text: String
+    @State private var isShown = false
+
+    var body: some View {
+        Button { isShown.toggle() } label: {
+            Image(systemName: "info.circle")
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.borderless)
+        .help(text)
+        .accessibilityLabel("More Info")
+        .popover(isPresented: $isShown, arrowEdge: .bottom) {
+            Text(text)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 240, alignment: .leading)
+                .padding(12)
+        }
     }
 }
 
