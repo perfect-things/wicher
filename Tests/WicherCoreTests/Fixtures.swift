@@ -10,14 +10,15 @@ func window(_ title: String,
             hidden: Bool = false,
             onCurrentSpace: Bool = true,
             appOnly: Bool = false,
-            wid: CGWindowID? = nil) -> WindowInfo {
-    WindowInfo(pid: pid, bundleID: nil, appName: app, appIcon: nil, title: title,
+            wid: CGWindowID? = nil,
+            bundle: String? = nil) -> WindowInfo {
+    WindowInfo(pid: pid, bundleID: bundle, appName: app, appIcon: nil, title: title,
                axWindow: nil, isMinimized: minimized, isAppHidden: hidden,
                isAppOnly: appOnly, cgWindowID: wid, onCurrentSpace: onCurrentSpace)
 }
 
-func appOnly(_ app: String, pid: pid_t) -> WindowInfo {
-    window("", pid: pid, app: app, appOnly: true)
+func appOnly(_ app: String, pid: pid_t, bundle: String? = nil) -> WindowInfo {
+    window("", pid: pid, app: app, appOnly: true, bundle: bundle)
 }
 
 func enumeration(_ windows: [WindowInfo], apps: [WindowInfo] = [],

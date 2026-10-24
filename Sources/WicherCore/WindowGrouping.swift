@@ -63,6 +63,8 @@ enum WindowGrouping {
 
     /// The bottom group's note for an app-only entry.
     static let appOnlyNote = "No Windows"
+    /// The bottom group's note for a window an exception moved there.
+    static let exceptionNote = "Exception"
 
     /// Minimized takes precedence, then hidden-app, then other Space, then
     /// other display; nil is a plain window. Without a `display` layout no
@@ -78,13 +80,16 @@ enum WindowGrouping {
     }
 
     /// The windows a search ranks: the profile's scope, minus hidden other
-    /// Spaces / other displays. Minimized and hidden-app windows stay
-    /// searchable whatever their placement; app-only entries never are.
+    /// Spaces / other displays and windows an exception hides. Minimized and
+    /// hidden-app windows stay searchable whatever their placement; app-only
+    /// entries never are.
     static func searchPool(for profile: SwitcherProfile,
                            enumeration: Enumeration,
                            activeAppPID: pid_t?,
-                           display: DisplayLayout? = nil) -> [WindowInfo] {
+                           display: DisplayLayout? = nil,
+                           exceptions: ExceptionRules = .none) -> [WindowInfo] {
         scoped(enumeration.windows, profile, activeAppPID).filter { w in
+            if exceptions.outcome(for: w) == .hide { return false }
             if profile.otherSpaces == .hide, !w.onCurrentSpace { return false }
             if profile.otherDisplays == .hide, w.onCurrentSpace,
                let display, let wid = w.cgWindowID, let frame = enumeration.windowFrames[wid],
@@ -98,26 +103,37 @@ enum WindowGrouping {
     /// results, which are one flat list but keep saying why a window would
     /// be at the bottom.
     static func note(for window: WindowInfo, profile: SwitcherProfile, enumeration: Enumeration,
-                     display: DisplayLayout? = nil) -> String? {
+                     display: DisplayLayout? = nil, exceptions: ExceptionRules = .none) -> String? {
+        let demoted = exceptions.outcome(for: window) == .bottom
         if window.isAppOnly {
-            return profile.appsWithoutWindows == .showAtBottom ? appOnlyNote : nil
+            return profile.appsWithoutWindows == .showAtBottom || demoted ? appOnlyNote : nil
         }
+        if demoted { return exceptionNote }
         guard let c = category(of: window, enumeration: enumeration, display: display),
               c.placement(in: profile) == .showAtBottom else { return nil }
         return c.note
     }
 
+    /// Exceptions apply after the profile: a window the profile hides stays
+    /// hidden, one an exception demotes goes to the bottom group (after the
+    /// placement categories, noted "Exception"), and one it hides is dropped.
+    /// An app-only entry keeps its "No Windows" note when demoted.
     static func groups(for profile: SwitcherProfile,
                        enumeration: Enumeration,
                        activeAppPID: pid_t?,
-                       display: DisplayLayout? = nil) -> WindowGroups {
+                       display: DisplayLayout? = nil,
+                       exceptions: ExceptionRules = .none) -> WindowGroups {
         var groups = WindowGroups()
         var byCategory: [Category: [WindowInfo]] = [:]
+        var demoted: [WindowInfo] = []
         for w in scoped(enumeration.windows, profile, activeAppPID) {
-            if let c = category(of: w, enumeration: enumeration, display: display) {
-                byCategory[c, default: []].append(w)
-            } else {
-                groups.main.append(w)
+            let c = category(of: w, enumeration: enumeration, display: display)
+            switch exceptions.outcome(for: w) {
+            case .hide: continue
+            case .bottom:
+                if c?.placement(in: profile) != .hide { demoted.append(w) }
+            case nil:
+                if let c { byCategory[c, default: []].append(w) } else { groups.main.append(w) }
             }
         }
 
@@ -132,8 +148,13 @@ enum WindowGrouping {
         for c in Category.allCases {
             place(byCategory[c] ?? [], c.placement(in: profile), note: c.note)
         }
-        place(scoped(enumeration.appsWithoutWindows, profile, activeAppPID),
-              profile.appsWithoutWindows, note: appOnlyNote)
+        place(demoted, .showAtBottom, note: exceptionNote)
+        let apps = scoped(enumeration.appsWithoutWindows, profile, activeAppPID)
+            .filter { exceptions.outcome(for: $0) != .hide }
+        let appsPlacement = profile.appsWithoutWindows
+        place(apps.filter { exceptions.outcome(for: $0) == nil }, appsPlacement, note: appOnlyNote)
+        place(apps.filter { exceptions.outcome(for: $0) == .bottom },
+              appsPlacement == .hide ? .hide : .showAtBottom, note: appOnlyNote)
         return groups
     }
 

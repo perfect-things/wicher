@@ -68,6 +68,7 @@ struct SettingsDetail: View {
             case .general: GeneralPane(model: model)
             case .appearance: AppearancePane()
             case .switchers: SwitchersPane(model: model)
+            case .exceptions: ExceptionsPane()
             case .about: AboutPane(model: model)
             }
         }
@@ -131,7 +132,7 @@ private struct GeneralPane: View {
         WindowEnumerator.shared.diagnosticsReport { report in
             collecting = false
             NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(report, forType: .string)
+            NSPasteboard.general.setString(report + ExceptionRules.diagnosticsReport(), forType: .string)
             copied = true
         }
     }

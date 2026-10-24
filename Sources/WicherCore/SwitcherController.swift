@@ -144,7 +144,9 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
                                   enumeration: WindowEnumerator.shared.enumerate(),
                                   activeAppPID: activeAppPID,
                                   display: displayLayout(),
+                                  exceptions: ExceptionRules(Settings.shared.exceptionRules),
                                   forward: forward)
+        if let session { Settings.shared.noteSeenApps(in: session.rows) }
         contentView.setQuery("")
         // Without Accessibility trust, every row comes from the CGWindowList
         // fallback, which has no titles — say so rather than silently listing

@@ -33,6 +33,8 @@ final class Settings {
         static let gridTextSize = "gridTextSize"
         static let gridIconSpacing = "gridIconSpacing"
         static let gridIconPadding = "gridIconPadding"
+        static let exceptionRules = "exceptionRules"
+        static let seenApps = "seenApps"
     }
 
     /// First-launch values of the layout sizes, and what the Appearance
@@ -83,6 +85,11 @@ final class Settings {
         selectOnScroll = defaults.bool(forKey: Key.scrollSelects)
         showDelayMs = max(0, defaults.integer(forKey: Key.showDelayMs))
         showMenuBarIcon = defaults.bool(forKey: Key.showMenuBarIcon)
+
+        let file: ExceptionRuleFile? = Self.decode(defaults.data(forKey: Key.exceptionRules))
+        exceptionRules = file?.rules ?? []
+        droppedExceptionRules = file?.dropped ?? 0
+        seenApps = Self.decode(defaults.data(forKey: Key.seenApps)) ?? []
 
         let decoded: [SwitcherProfile]? = Self.decode(defaults.data(forKey: Key.profiles))
         if let decoded, !decoded.isEmpty {
@@ -218,6 +225,51 @@ final class Settings {
             guard profiles != oldValue else { return }
             persist(profiles, Key.profiles)
         }
+    }
+
+    /// Settings → Exceptions. Global: every switcher applies them, after its
+    /// own placements (see `ExceptionRules`).
+    var exceptionRules: [ExceptionRule] {
+        didSet {
+            guard exceptionRules != oldValue else { return }
+            persist(ExceptionRuleFile(rules: exceptionRules), Key.exceptionRules)
+        }
+    }
+
+    /// Stored rules the last launch couldn't read and dropped (for Copy
+    /// Diagnostics). They are gone from storage once the list is next saved.
+    @ObservationIgnored private(set) var droppedExceptionRules = 0
+
+    /// One rule by id, for a binding that survives the rule's removal: a
+    /// removed id ignores writes.
+    subscript(exceptionID id: UUID) -> ExceptionRule {
+        get { exceptionRules.first { $0.id == id } ?? ExceptionRule(id: id, target: .titleIs("?"), action: .hide) }
+        set {
+            guard let i = exceptionRules.firstIndex(where: { $0.id == id }) else { return }
+            exceptionRules[i] = newValue
+        }
+    }
+
+    /// Apps that have had a row in the switcher, newest first — the app
+    /// picker's "Seen by Wicher" section, which catches system processes
+    /// (loginwindow…) that are only around briefly.
+    private(set) var seenApps: [AppRef] {
+        didSet { if seenApps != oldValue { persist(seenApps, Key.seenApps) } }
+    }
+
+    static let seenAppsLimit = 200
+
+    /// Adds the apps of `rows` not seen before (existing ones keep their
+    /// place, so this writes only when a new app turns up).
+    func noteSeenApps(in rows: [DisplayRow]) {
+        var known = Set(seenApps.map(\.key))
+        var new: [AppRef] = []
+        for case let .item(info, _, _) in rows {
+            let app = AppRef(bundleID: info.bundleID, name: info.appName)
+            if known.insert(app.key).inserted { new.append(app) }
+        }
+        guard !new.isEmpty else { return }
+        seenApps = Array((new + seenApps).prefix(Self.seenAppsLimit))
     }
 
     /// One profile by id, for a binding that survives the profile's removal:

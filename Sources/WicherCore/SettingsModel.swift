@@ -4,7 +4,7 @@ import SwiftUI
 
 /// The Settings window's sidebar entries.
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, appearance, switchers, about
+    case general, appearance, switchers, exceptions, about
 
     var id: Self { self }
 
@@ -13,6 +13,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .general: return "General"
         case .appearance: return "Appearance"
         case .switchers: return "Switchers"
+        case .exceptions: return "Exceptions"
         case .about: return "About"
         }
     }
@@ -22,6 +23,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .general: return "gearshape"
         case .appearance: return "paintbrush"
         case .switchers: return "rectangle.stack"
+        case .exceptions: return "eye.slash"
         case .about: return "info.circle"
         }
     }

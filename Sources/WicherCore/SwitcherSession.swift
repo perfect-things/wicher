@@ -20,6 +20,8 @@ struct SwitcherSession {
     let activeAppPID: pid_t?
     /// Where the switcher opened, for the "other displays" placement.
     let display: DisplayLayout?
+    /// Settings → Exceptions, as of when the session began.
+    let exceptions: ExceptionRules
     private var enumeration: Enumeration
 
     private(set) var query = ""
@@ -31,11 +33,12 @@ struct SwitcherSession {
     /// tap+release switches back without the panel ever being drawn; going
     /// backward preselects the last row.
     init(profile: SwitcherProfile, enumeration: Enumeration, activeAppPID: pid_t?,
-         display: DisplayLayout? = nil, forward: Bool) {
+         display: DisplayLayout? = nil, exceptions: ExceptionRules = .none, forward: Bool) {
         self.profile = profile
         self.enumeration = enumeration
         self.activeAppPID = activeAppPID
         self.display = display
+        self.exceptions = exceptions
         rebuildRows()
         let count = selectableIndexes.count
         selectionPos = forward ? min(1, max(count - 1, 0)) : max(count - 1, 0)
@@ -152,7 +155,8 @@ struct SwitcherSession {
             let groups = WindowGrouping.groups(for: profile,
                                                enumeration: enumeration,
                                                activeAppPID: activeAppPID,
-                                               display: display)
+                                               display: display,
+                                               exceptions: exceptions)
             for info in groups.main { rows.append(.item(info, [])) }
             if !groups.main.isEmpty && !groups.bottom.isEmpty { rows.append(.separator) }
             for (info, note) in groups.bottom { rows.append(.item(info, [], note: note)) }
@@ -160,7 +164,8 @@ struct SwitcherSession {
             // Search mode: a single flat, scored list (no separator); bottom
             // windows keep their notes.
             let pool = WindowGrouping.searchPool(for: profile, enumeration: enumeration,
-                                                 activeAppPID: activeAppPID, display: display)
+                                                 activeAppPID: activeAppPID, display: display,
+                                                 exceptions: exceptions)
             var scored: [(info: WindowInfo, ranges: [NSRange], score: Int)] = []
             for w in pool {
                 if let r = FuzzyMatcher.match(query: query, candidate: w.displayTitle) {
@@ -172,7 +177,7 @@ struct SwitcherSession {
             scored.sort { $0.score > $1.score }
             for s in scored {
                 let note = WindowGrouping.note(for: s.info, profile: profile, enumeration: enumeration,
-                                               display: display)
+                                               display: display, exceptions: exceptions)
                 rows.append(.item(s.info, s.ranges, note: note))
             }
         }

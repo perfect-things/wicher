@@ -43,7 +43,7 @@ hot keys and the HUD need the assembled `.app`.
 The package is split so the code is testable: `Sources/WicherCore` (library, all the
 code) and `Sources/wicher` (executable: just `main.swift` → `WicherApp.run()`). Tests
 in `Tests/WicherCoreTests` use `@testable import WicherCore` and cover the pure pieces —
-`WindowAssembly` (the scan → rows classification), `WindowGrouping`, `FuzzyMatcher`,
+`WindowAssembly` (the scan → rows classification), `WindowGrouping`, `ExceptionRules`, `FuzzyMatcher`,
 `HUDMetrics`, `IconGridLayout`, `TextContrast`, `SwitcherSession` (incl. live updates),
 `HotKeyCombo`, `Settings` (via `Settings(defaults:)` on a test suite) — plus
 `SwitcherListView` and `SwitcherIconGridView` layout rendered offscreen, and the Settings window's panes. Fixtures are hand-built (`axWindow: nil`;
@@ -132,16 +132,26 @@ database. Flow of one switch:
    lie on a display other than the one the session opened on (`DisplayLayout`, in CG
    global coordinates — `CGDisplayBounds`, no `NSScreen` flip). A display's current Space
    is on screen, so "other Spaces" never includes another display's visible windows.
+   **Exceptions** (`ExceptionRules`, Settings → Exceptions) apply here too, after the
+   profile: global rules of one target (app by bundle ID, else name; title contains / is,
+   case-insensitive, trimmed) and one action (hide / hide if no windows / at bottom). They
+   only hide or demote — a window the profile hides stays hidden — hide beats at bottom,
+   demoted windows go after the placement categories noted "Exception" (app-only entries
+   keep "No Windows"), and hidden ones leave search too. Stored as
+   `{"version": 1, "rules": [...]}` JSON (the future export format); a rule that doesn't
+   decode is dropped and counted, not fatal.
 6. **`WindowActivator`** — activate, then raise; a minimized window is un-minimized by
    `DeminiaturizeWaiter`, which raises on `kAXWindowDeminiaturizedNotification` (0.6 s
    timeout). App-only entries get a Dock-click-equivalent reopen.
 
 Settings window: `SettingsWindow` (AppKit window + `NSSplitViewController`, sidebar
-of General / Appearance / Switchers / About) hosting SwiftUI panes (`SettingsViews`: grouped `Form`s).
+of General / Appearance / Switchers / Exceptions / About) hosting SwiftUI panes (`SettingsViews`: grouped `Form`s).
 `Settings` is `@Observable`: panes bind straight to it (`@Bindable … = Settings.shared`;
 profile rows by id via `settings[profileID:]`, which survives Remove Switcher) — no copies
 to drift. `SettingsModel` (`@Observable`) holds only what isn't a setting: the pane, the
-cached login-item status and the shortcut notes. The shortcut button is a SwiftUI `Button`
+cached login-item status and the shortcut notes. The Exceptions pane's app picker lists
+running Dock apps, `Settings.seenApps` (apps that had a row, recorded at session start —
+how loginwindow & co. get in) and a shallow scan of the Applications folders. The shortcut button is a SwiftUI `Button`
 over the `ShortcutRecorder` model.
 The window sets `autorecalculatesKeyViewLoop`: the sidebar and the pane are separate hosting
 views, and without it AppKit's key-view loop is computed for the first pane only — on the
