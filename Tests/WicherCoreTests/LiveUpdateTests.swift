@@ -79,11 +79,31 @@ final class SettingsTests: XCTestCase {
 
     func testDefaultsAndClamping() {
         let settings = Settings(defaults: defaults)
-        XCTAssertEqual(settings.iconSize, 32)
+        XCTAssertEqual(settings.iconSize, Settings.Default.iconSize)
         settings.iconSize = 1000
         XCTAssertEqual(settings.iconSize, HUDMetrics.iconRange.upperBound)
         settings.showDelayMs = -5
         XCTAssertEqual(settings.showDelayMs, 0)
+    }
+
+    func testLayoutResetRestoresDefaults() {
+        let settings = Settings(defaults: defaults)
+        XCTAssertTrue(settings.isListLayoutDefault)
+        XCTAssertTrue(settings.isIconsLayoutDefault)
+
+        settings.rowPadding = 20
+        settings.gridIconSpacing = 30
+        XCTAssertFalse(settings.isListLayoutDefault)
+        XCTAssertFalse(settings.isIconsLayoutDefault)
+
+        settings.resetListLayout()
+        XCTAssertTrue(settings.isListLayoutDefault)
+        XCTAssertFalse(settings.isIconsLayoutDefault, "each section resets only its own values")
+        settings.resetIconsLayout()
+        XCTAssertTrue(settings.isIconsLayoutDefault)
+        // Stored values are removed, not overwritten with today's defaults.
+        let stored = Set(defaults.persistentDomain(forName: suite)?.keys ?? [:].keys)
+        XCTAssertTrue(stored.isDisjoint(with: ["rowPadding", "gridIconSpacing"]), "\(stored)")
     }
 
     func testProfilesRoundTripAndAreObserved() {
@@ -126,7 +146,7 @@ final class SettingsTests: XCTestCase {
         let settings = Settings(defaults: defaults)
         XCTAssertEqual(settings.backgroundSurface, .defaultBackground)
         XCTAssertEqual(settings.highlightSurface, .defaultHighlight)
-        XCTAssertEqual(settings.gridIconSize, 96)
+        XCTAssertEqual(settings.gridIconSize, Settings.Default.gridIconSize)
 
         let red = SurfaceAppearance(style: .blurred, light: Tint(color: RGBColor(red: 1, green: 0, blue: 0), opacity: 50),
                                     dark: Tint(color: .white, opacity: 5))
@@ -143,7 +163,7 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(reloaded.gridIconSize, IconGridLayout.iconRange.upperBound)
         XCTAssertEqual(reloaded.gridIconSpacing, 3)
         XCTAssertEqual(reloaded.gridIconPadding, 20)
-        XCTAssertEqual(reloaded.iconSize, 32, "List sizes are separate")
+        XCTAssertEqual(reloaded.iconSize, Settings.Default.iconSize, "List sizes are separate")
     }
 
     func testProfileLayoutRoundTrips() {

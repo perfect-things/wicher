@@ -173,7 +173,8 @@ private struct AppearancePane: View {
                             range: HUDMetrics.textRange, unit: "pt")
                 SettingToggle("Show app names on the left", isOn: $settings.showAppNames)
             } header: {
-                Text("List")
+                ResettableHeader(title: "List", isDefault: settings.isListLayoutDefault,
+                                 reset: settings.resetListLayout)
             }
 
             Section {
@@ -187,10 +188,34 @@ private struct AppearancePane: View {
                 ValueSlider(title: "Text size", value: $settings.gridTextSize,
                             range: IconGridLayout.textRange, unit: "pt")
             } header: {
-                Text("Icons")
+                ResettableHeader(title: "Icons", isDefault: settings.isIconsLayoutDefault,
+                                 reset: settings.resetIconsLayout)
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// A section title with a reset button at its end, shown once a value in
+/// the section differs from its default. Hidden rather than removed, so the
+/// header keeps its height and the boxes below don't jump.
+private struct ResettableHeader: View {
+    let title: String
+    let isDefault: Bool
+    let reset: () -> Void
+
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Button("Reset \(title) to default", systemImage: "arrow.counterclockwise", action: reset)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .help("Reset to default")
+                .opacity(isDefault ? 0 : 1)
+                .disabled(isDefault)
+                .accessibilityHidden(isDefault)
+        }
     }
 }
 

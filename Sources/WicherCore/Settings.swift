@@ -35,23 +35,37 @@ final class Settings {
         static let gridIconPadding = "gridIconPadding"
     }
 
+    /// First-launch values of the layout sizes, and what the Appearance
+    /// pane's reset buttons put back.
+    enum Default {
+        static let iconSize = 44
+        static let textSize = 16
+        static let rowPadding = 5
+        static let panelWidthScale = 85
+        static let showAppNames = true
+        static let gridIconSize = 128
+        static let gridTextSize = 14
+        static let gridIconSpacing = 15
+        static let gridIconPadding = 10
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         defaults.register(defaults: [
             Key.appearance: AppearanceMode.system.rawValue,
-            Key.iconSize: 32,
-            Key.textSize: 16,
-            Key.rowPadding: 7,
+            Key.iconSize: Default.iconSize,
+            Key.textSize: Default.textSize,
+            Key.rowPadding: Default.rowPadding,
             Key.hoverSelects: true,
             Key.scrollSelects: true,
             Key.showDelayMs: 180,
             Key.showMenuBarIcon: true,
-            Key.showAppNames: true,
-            Key.panelWidthScale: 100,
-            Key.gridIconSize: 96,
-            Key.gridTextSize: 13,
-            Key.gridIconSpacing: 12,
-            Key.gridIconPadding: 8,
+            Key.showAppNames: Default.showAppNames,
+            Key.panelWidthScale: Default.panelWidthScale,
+            Key.gridIconSize: Default.gridIconSize,
+            Key.gridTextSize: Default.gridTextSize,
+            Key.gridIconSpacing: Default.gridIconSpacing,
+            Key.gridIconPadding: Default.gridIconPadding,
         ])
         appearanceMode = AppearanceMode(rawValue: defaults.integer(forKey: Key.appearance)) ?? .system
         backgroundSurface = Self.decode(defaults.data(forKey: Key.backgroundSurface)) ?? .defaultBackground
@@ -215,6 +229,39 @@ final class Settings {
             guard let i = profiles.firstIndex(where: { $0.id == id }), profiles[i] != newValue else { return }
             profiles[i] = newValue
         }
+    }
+
+    var isListLayoutDefault: Bool {
+        iconSize == Default.iconSize && textSize == Default.textSize && rowPadding == Default.rowPadding
+            && panelWidthScale == Default.panelWidthScale && showAppNames == Default.showAppNames
+    }
+
+    var isIconsLayoutDefault: Bool {
+        gridIconSize == Default.gridIconSize && gridTextSize == Default.gridTextSize
+            && gridIconSpacing == Default.gridIconSpacing && gridIconPadding == Default.gridIconPadding
+    }
+
+    /// Back to `Default`, and the stored values removed, so a later change of
+    /// a default reaches this user too.
+    func resetListLayout() {
+        iconSize = Default.iconSize
+        textSize = Default.textSize
+        rowPadding = Default.rowPadding
+        panelWidthScale = Default.panelWidthScale
+        showAppNames = Default.showAppNames
+        forget(Key.iconSize, Key.textSize, Key.rowPadding, Key.panelWidthScale, Key.showAppNames)
+    }
+
+    func resetIconsLayout() {
+        gridIconSize = Default.gridIconSize
+        gridTextSize = Default.gridTextSize
+        gridIconSpacing = Default.gridIconSpacing
+        gridIconPadding = Default.gridIconPadding
+        forget(Key.gridIconSize, Key.gridTextSize, Key.gridIconSpacing, Key.gridIconPadding)
+    }
+
+    private func forget(_ keys: String...) {
+        for key in keys { defaults.removeObject(forKey: key) }
     }
 
     private func store<T: Equatable>(_ value: T, _ oldValue: T, _ key: String) {
