@@ -218,7 +218,6 @@ final class AppController: NSObject, NSApplicationDelegate {
                 guard trusted != self.isTrusted else { return }
                 self.isTrusted = trusted
                 self.updateTrustIndicator()
-                self.settings.model.refreshShortcutNotes()
                 if trusted { WindowEnumerator.shared.accessibilityGranted() }
             }
         }

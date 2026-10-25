@@ -1,4 +1,5 @@
 import Foundation
+import ApplicationServices
 import CoreGraphics
 @testable import WicherCore
 
@@ -38,9 +39,32 @@ func profile(scope: WindowScope = .allApps,
              otherSpaces: Placement = .show,
              minimized: Placement = .showAtBottom,
              hidden: Placement = .showAtBottom,
-             apps: Placement = .showAtBottom) -> SwitcherProfile {
-    SwitcherProfile(id: UUID(), name: "Test", keyCode: 0, carbonModifiers: 0,
+             apps: Placement = .showAtBottom,
+             keyCode: UInt32 = 0,
+             carbonModifiers: UInt32 = 0) -> SwitcherProfile {
+    SwitcherProfile(id: UUID(), name: "Test", keyCode: keyCode, carbonModifiers: carbonModifiers,
                     scope: scope, otherDisplays: otherDisplays, otherSpaces: otherSpaces,
                     minimized: minimized,
                     hidden: hidden, appsWithoutWindows: apps)
 }
+
+// MARK: - Enumeration inputs (`WindowAssembly`)
+
+func meta(_ pid: pid_t, _ name: String, hidden: Bool = false, regular: Bool = true) -> AppMeta {
+    AppMeta(pid: pid, bundleID: "test.\(name)", name: name, icon: nil, isHidden: hidden, isRegular: regular)
+}
+
+func fact(_ id: CGWindowID, pid: pid_t, onscreen: Bool = true, layer: Int = 0,
+          size: CGSize = CGSize(width: 800, height: 600)) -> CGWindowFact {
+    CGWindowFact(id: id, pid: pid, layer: layer, isOnscreen: onscreen, order: Int(id), size: size, alpha: 1)
+}
+
+func ax(_ wid: CGWindowID?, _ title: String, minimized: Bool = false) -> ScannedWindow {
+    ScannedWindow(element: AXUIElementCreateApplication(1), title: title, minimized: minimized, wid: wid)
+}
+
+func answered(_ windows: [ScannedWindow]) -> AppScan {
+    AppScan(windows: windows, answered: !windows.isEmpty, responded: true)
+}
+
+var timedOut: AppScan { AppScan(windows: [], answered: false, responded: false) }

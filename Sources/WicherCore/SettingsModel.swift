@@ -53,6 +53,7 @@ final class SettingsModel {
     private(set) var loginItemError: String?
 
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
+    @ObservationIgnored private var trustTimer: Timer?
 
     init() {
         Settings.observe({ Settings.shared.profiles.map(\.combo) }) { [weak self] _ in
@@ -126,8 +127,9 @@ final class SettingsModel {
         combo.problem(amongOthers: Settings.shared.profiles.filter { $0.id != id }.map(\.combo))
     }
 
-    /// Recomputes `shortcutNotes` and `accessibilityTrusted`. Call when what they depend on changes
-    /// outside `Settings`: Accessibility trust changes, the window opens.
+    /// Recomputes `shortcutNotes` and `accessibilityTrusted`. Runs when the
+    /// shortcuts change, when the window opens, and when trust changes while
+    /// it is open (`watchAccessibilityTrust`).
     func refreshShortcutNotes() {
         let profiles = Settings.shared.profiles
         let trusted = AXIsProcessTrusted()
@@ -137,6 +139,27 @@ final class SettingsModel {
             notes[profile.id] = Self.shortcutNote(for: profile.combo)
         }
         if notes != shortcutNotes { shortcutNotes = notes }
+    }
+
+    /// Polls Accessibility trust while the window is open — it is granted or
+    /// revoked in System Settings, often with this window in the background,
+    /// and the Switchers pane says what it changes. Until `stopWatchingAccessibilityTrust`.
+    func watchAccessibilityTrust() {
+        guard trustTimer == nil else { return }
+        let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {   // added to RunLoop.main
+                guard let self, AXIsProcessTrusted() != self.accessibilityTrusted else { return }
+                self.refreshShortcutNotes()
+            }
+        }
+        timer.tolerance = 1
+        RunLoop.main.add(timer, forMode: .common)
+        trustTimer = timer
+    }
+
+    func stopWatchingAccessibilityTrust() {
+        trustTimer?.invalidate()
+        trustTimer = nil
     }
 
     /// A shortcut's reverse, and how it commits.

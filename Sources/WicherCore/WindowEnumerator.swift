@@ -64,7 +64,7 @@ private enum RefreshScope: Equatable {
 
 /// An unordered scan result. MRU ordering is applied at read time, not here,
 /// so a cached snapshot still reflects the newest recency stamps.
-private struct Snapshot {
+struct Snapshot {
     let windows: [WindowInfo]
     let appsWithoutWindows: [WindowInfo]
     let currentSpaceWindowIDs: Set<CGWindowID>
@@ -94,6 +94,10 @@ private struct Snapshot {
 ///   writes from `scanQueue` and the main thread reads.
 /// Scanning code (`performScan`, `scanApps`, `reconcile`) touches only the
 /// lock-guarded half and immutable configuration.
+///
+/// The diagnostics report and the AX observers live in extensions in
+/// `WindowEnumerator+Diagnostics.swift` and `WindowEnumerator+Observers.swift`;
+/// what they touch is internal rather than private for that reason only.
 final class WindowEnumerator: @unchecked Sendable {
     static let shared = WindowEnumerator()
 
@@ -113,10 +117,10 @@ final class WindowEnumerator: @unchecked Sendable {
 
     // MARK: - Snapshot + caches (lock-guarded, touched from the scan queue)
 
-    private let lock = NSLock()
-    private var snapshot: Snapshot?
+    let lock = NSLock()
+    var snapshot: Snapshot?
     /// Per-window title / element / minimized memory; see `WindowCaches`.
-    private var caches = WindowCaches()
+    var caches = WindowCaches()
     /// Every app's AX answer from the last pass, so `rescan` can ask one app
     /// and rebuild the snapshot with the rest as they were.
     private var lastScans: [pid_t: AppScan] = [:]
@@ -143,7 +147,7 @@ final class WindowEnumerator: @unchecked Sendable {
 
     // MARK: - Refresh machinery (main thread only)
 
-    @MainActor private var observers: [pid_t: AXObserver] = [:]
+    @MainActor var observers: [pid_t: AXObserver] = [:]
     @MainActor private var refreshTimer: Timer?
     @MainActor private var pendingRefresh: DispatchWorkItem?
     @MainActor private var refreshRequestedAt: Date?
@@ -155,7 +159,7 @@ final class WindowEnumerator: @unchecked Sendable {
     @MainActor private var suspended = false
     @MainActor private var started = false
 
-    private let scanQueue = DispatchQueue(label: "co.wicher.scan", qos: .userInitiated)
+    let scanQueue = DispatchQueue(label: "co.wicher.scan", qos: .userInitiated)
     private let workerQueue = DispatchQueue(label: "co.wicher.scan.workers",
                                             qos: .userInitiated,
                                             attributes: .concurrent)
@@ -172,7 +176,7 @@ final class WindowEnumerator: @unchecked Sendable {
     private var maxSnapshotAge: TimeInterval { refreshInterval + 2.5 }
     /// AX messaging timeout for background scans — generous, because nothing
     /// is waiting on them.
-    private let backgroundTimeout: TimeInterval = 1.0
+    let backgroundTimeout: TimeInterval = 1.0
     /// AX messaging timeout when a summon has to scan synchronously. Short, so
     /// one wedged app cannot stall the HUD; the title/AX caches cover whatever
     /// a timeout loses.
@@ -187,7 +191,7 @@ final class WindowEnumerator: @unchecked Sendable {
     /// `kAXUIElementDestroyedNotification` on an *app* element reports the
     /// app's own destruction, so it is registered per window instead (see
     /// `observeDestruction`).
-    private static let observedNotifications: [String] = [
+    static let observedNotifications: [String] = [
         kAXWindowCreatedNotification,
         kAXWindowMiniaturizedNotification,
         kAXWindowDeminiaturizedNotification,
@@ -320,7 +324,6 @@ final class WindowEnumerator: @unchecked Sendable {
     private func reconcile(_ snap: Snapshot) -> Snapshot {
         let selfPID = ProcessInfo.processInfo.processIdentifier
         let facts = windowFacts(resolvingSpaces: false)
-        let currentSpace = WindowAssembly.currentSpace(facts)
         let live = Set(facts.map(\.id))
 
         // Hidden flags from the metadata cache (a hide/unhide refreshes its
@@ -330,153 +333,46 @@ final class WindowEnumerator: @unchecked Sendable {
         // since the last pass is read live — one app.
         lock.lock()
         let cachedMetas = metaCache
+        let selfWindows = selfWindowsCache
+        let cachedTitleIDs = Set(caches.titles.keys)
         lock.unlock()
         var hiddenByPID: [pid_t: Bool] = [:]
         for case let (pid, meta?) in cachedMetas where Self.isAlive(pid) { hiddenByPID[pid] = meta.isHidden }
 
-        let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        if let frontPID, frontPID != selfPID, hiddenByPID[frontPID] == nil,
-           let app = NSRunningApplication(processIdentifier: frontPID),
-           app.activationPolicy != .prohibited, !app.isTerminated {
-            hiddenByPID[frontPID] = app.isHidden
-        }
-        var frontWindows: [CGWindowID: ScannedWindow] = [:]
-        var frontIsAuthoritative = false
-        if let frontPID, frontPID != selfPID, hiddenByPID[frontPID] != nil {
-            let scan = Self.scanApp(pid: frontPID, timeout: reconcileTimeout)
-            frontIsAuthoritative = scan.responded
-            for window in scan.windows where window.wid != nil {
-                frontWindows[window.wid!] = window
+        var front: (meta: AppMeta, scan: AppScan)?
+        if let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier, frontPID != selfPID {
+            var meta = hiddenByPID[frontPID] != nil ? cachedMetas[frontPID] ?? nil : nil
+            if meta == nil, let app = NSRunningApplication(processIdentifier: frontPID) {
+                meta = Self.meta(of: app, pid: frontPID, icon: icon(for:))
+            }
+            if let meta {
+                hiddenByPID[frontPID] = meta.isHidden
+                front = (meta, Self.scanApp(pid: frontPID, timeout: reconcileTimeout))
             }
         }
 
-        lock.lock()
-        let selfWindows = selfWindowsCache
-        let cachedTitleIDs = Set(caches.titles.keys)
-        lock.unlock()
-        // Titles learned here, merged into `caches.titles` at the end.
-        var freshTitles: [CGWindowID: String] = [:]
-
-        var windows: [WindowInfo] = []
-        var seen = Set<CGWindowID>()
-
-        for window in snap.windows {
-            guard let isHidden = hiddenByPID[window.pid] else { continue }  // app quit
-            if let wid = window.cgWindowID, !live.contains(wid) { continue } // window closed
-
-            var title = window.title
-            var minimized = window.isMinimized
-            var element = window.axWindow
-
-            // wicher's own windows come from `NSApp`, never from the snapshot.
-            if window.pid == selfPID { continue }
-
-            // Only a window we can identify can be matched against the fresh
-            // scan; without `_AXUIElementGetWindow` there are no ids at all, and
-            // dropping every front-app window would be a poor way to degrade.
-            if window.pid == frontPID, frontIsAuthoritative, let wid = window.cgWindowID {
-                guard let fresh = frontWindows[wid] else { continue }
-                minimized = fresh.minimized
-                element = fresh.element
-                if !fresh.title.isEmpty { title = fresh.title; freshTitles[wid] = fresh.title }
-            }
-
-            if let wid = window.cgWindowID { seen.insert(wid) }
-            windows.append(copy(window,
-                                title: title,
-                                element: element,
-                                minimized: minimized,
-                                hidden: isHidden,
-                                onCurrentSpace: WindowAssembly.spaceMembership(wid: window.cgWindowID,
-                                                                minimized: minimized,
-                                                                hidden: isHidden,
-                                                                currentSpace: currentSpace)))
-        }
-
-        // Windows the front app has opened since the snapshot was taken.
-        if let frontPID, frontIsAuthoritative,
-           let app = NSRunningApplication(processIdentifier: frontPID) {
-            let isHidden = hiddenByPID[frontPID] ?? false
-            for (wid, window) in frontWindows.sorted(by: { $0.key < $1.key }) where !seen.contains(wid) {
-                guard !window.title.isEmpty else { continue }
-                if let fact = facts.first(where: { $0.id == wid }), fact.isFullScreenShim {
-                    continue    // full-screen shim, as in `performScan`
-                }
-                windows.append(WindowInfo(pid: frontPID,
-                                          bundleID: app.bundleIdentifier,
-                                          appName: app.localizedName ?? "Unknown",
-                                          appIcon: icon(for: app),
-                                          title: window.title,
-                                          axWindow: window.element,
-                                          isMinimized: window.minimized,
-                                          isAppHidden: isHidden,
-                                          cgWindowID: wid,
-                                          onCurrentSpace: WindowAssembly.spaceMembership(wid: wid,
-                                                                          minimized: window.minimized,
-                                                                          hidden: isHidden,
-                                                                          currentSpace: currentSpace)))
-                freshTitles[wid] = window.title
-            }
-        }
-
-        windows.append(contentsOf: ownWindowRows(selfWindows, currentSpace: currentSpace))
-
-        // An app whose last window just closed belongs under "Apps"; one that
-        // just opened its first must leave it.
-        let pidsWithWindows = Set(windows.map(\.pid))
-        var appsWithoutWindows = snap.appsWithoutWindows.compactMap { entry -> WindowInfo? in
-            guard let isHidden = hiddenByPID[entry.pid], !pidsWithWindows.contains(entry.pid) else { return nil }
-            return copy(entry, title: entry.title, element: entry.axWindow,
-                        minimized: false, hidden: isHidden, onCurrentSpace: true)
-        }
-        if let frontPID, frontIsAuthoritative, !pidsWithWindows.contains(frontPID),
-           !appsWithoutWindows.contains(where: { $0.pid == frontPID }),
-           let app = NSRunningApplication(processIdentifier: frontPID),
-           app.activationPolicy == .regular, let name = app.localizedName {
-            appsWithoutWindows.append(WindowInfo(pid: frontPID,
-                                                 bundleID: app.bundleIdentifier,
-                                                 appName: name,
-                                                 appIcon: icon(for: app),
-                                                 title: name,
-                                                 axWindow: AXUIElementCreateApplication(frontPID),
-                                                 isMinimized: false,
-                                                 isAppHidden: app.isHidden,
-                                                 isAppOnly: true))
-        }
+        let reconciled = WindowAssembly.reconcile(
+            windows: snap.windows,
+            appsWithoutWindows: snap.appsWithoutWindows,
+            facts: facts,
+            hiddenByPID: hiddenByPID,
+            front: front,
+            ownRows: ownWindowRows(selfWindows, currentSpace: WindowAssembly.currentSpace(facts)),
+            selfPID: selfPID)
 
         // Merge, don't overwrite: a background scan may have stored titles
         // since we read the cache, and they'd be lost until the next scan.
         // Only entries for windows seen closed here are dropped.
         lock.lock()
-        caches.titles.merge(freshTitles) { _, fresh in fresh }
+        caches.titles.merge(reconciled.freshTitles) { _, fresh in fresh }
         for wid in cachedTitleIDs where !live.contains(wid) { caches.titles[wid] = nil }
         lock.unlock()
 
-        return Snapshot(windows: windows,
-                        appsWithoutWindows: appsWithoutWindows,
-                        currentSpaceWindowIDs: currentSpace,
+        return Snapshot(windows: reconciled.windows,
+                        appsWithoutWindows: reconciled.appsWithoutWindows,
+                        currentSpaceWindowIDs: WindowAssembly.currentSpace(facts),
                         windowFrames: WindowAssembly.windowFrames(facts),
                         takenAt: snap.takenAt)
-    }
-
-    /// `WindowInfo` is immutable, so updating a flag means rebuilding it.
-    private func copy(_ info: WindowInfo,
-                      title: String,
-                      element: AXUIElement?,
-                      minimized: Bool,
-                      hidden: Bool,
-                      onCurrentSpace: Bool) -> WindowInfo {
-        WindowInfo(pid: info.pid,
-                   bundleID: info.bundleID,
-                   appName: info.appName,
-                   appIcon: info.appIcon,
-                   title: title,
-                   axWindow: element,
-                   isMinimized: minimized,
-                   isAppHidden: hidden,
-                   isAppOnly: info.isAppOnly,
-                   cgWindowID: info.cgWindowID,
-                   onCurrentSpace: onCurrentSpace)
     }
 
     /// Applies the current MRU ordering to a snapshot.
@@ -513,12 +409,12 @@ final class WindowEnumerator: @unchecked Sendable {
     /// Coalesced background refresh. Several callers (AX notifications, app
     /// activation, the summon path) ask for one at once; only one scan runs,
     /// covering the union of what they asked for — one app, a few, or all.
-    @MainActor private func scheduleRefresh(after delay: TimeInterval) {
+    @MainActor func scheduleRefresh(after delay: TimeInterval) {
         scheduleRefresh(.all, after: delay)
     }
 
     /// A refresh of `pid` alone (see `rescan`).
-    @MainActor private func scheduleRefresh(pid: pid_t, after delay: TimeInterval) {
+    @MainActor func scheduleRefresh(pid: pid_t, after delay: TimeInterval) {
         scheduleRefresh(.apps([pid]), after: delay)
     }
 
@@ -629,16 +525,7 @@ final class WindowEnumerator: @unchecked Sendable {
     private func runningMetas(refreshing pids: Set<pid_t>?) -> [AppMeta] {
         var fresh: [pid_t: AppMeta?] = [:]
         func read(_ app: NSRunningApplication, pid: pid_t) {
-            guard app.activationPolicy != .prohibited, !app.isTerminated else {
-                fresh[pid] = .some(nil)
-                return
-            }
-            fresh[pid] = AppMeta(pid: pid,
-                                 bundleID: app.bundleIdentifier,
-                                 name: app.localizedName ?? "Unknown",
-                                 icon: icon(for: app),
-                                 isHidden: app.isHidden,
-                                 isRegular: app.activationPolicy == .regular)
+            fresh[pid] = .some(Self.meta(of: app, pid: pid, icon: icon(for:)))
         }
         if let pids {
             lock.lock()
@@ -655,6 +542,19 @@ final class WindowEnumerator: @unchecked Sendable {
         metaCache = fresh
         lock.unlock()
         return fresh.keys.sorted().compactMap { fresh[$0] ?? nil }
+    }
+
+    /// `app` as an `AppMeta`, or nil for a process that is skipped
+    /// (`.prohibited`, or gone). Several LaunchServices round trips.
+    private static func meta(of app: NSRunningApplication, pid: pid_t,
+                             icon: (NSRunningApplication) -> NSImage?) -> AppMeta? {
+        guard app.activationPolicy != .prohibited, !app.isTerminated else { return nil }
+        return AppMeta(pid: pid,
+                       bundleID: app.bundleIdentifier,
+                       name: app.localizedName ?? "Unknown",
+                       icon: icon(app),
+                       isHidden: app.isHidden,
+                       isRegular: app.activationPolicy == .regular)
     }
 
     /// Whether `pid` is still running: a signal probe, no IPC. Pid reuse is
@@ -747,7 +647,7 @@ final class WindowEnumerator: @unchecked Sendable {
         return results
     }
 
-    private static func scanApp(pid: pid_t, timeout: TimeInterval) -> AppScan {
+    static func scanApp(pid: pid_t, timeout: TimeInterval) -> AppScan {
         let axApp = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(axApp, Float(timeout))
 
@@ -805,7 +705,7 @@ final class WindowEnumerator: @unchecked Sendable {
     ///
     /// `resolvingSpaces` also sets `isOrderedOut` — one window-server call per
     /// plausible off-screen window, so not on the summon path (`reconcile`).
-    private func windowFacts(resolvingSpaces: Bool = true) -> [CGWindowFact] {
+    func windowFacts(resolvingSpaces: Bool = true) -> [CGWindowFact] {
         let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
         guard let infos = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
             return []
@@ -912,76 +812,6 @@ final class WindowEnumerator: @unchecked Sendable {
         }
     }
 
-    // MARK: - Diagnostics
-
-    /// A human-readable dump of what AX and CGWindowList each report, per app.
-    ///
-    /// Window enumeration on macOS is mostly undocumented behavior, and the
-    /// interesting cases (a hidden app, a full-screen app on another Space) are
-    /// exactly the ones that cannot be reproduced from a shell. This is how to
-    /// see the ground truth on a real machine: Settings → General → Copy Diagnostics.
-    ///
-    /// Asks every regular app in turn, up to `backgroundTimeout` each, so it is
-    /// built on the scan queue — one stuck app would otherwise beachball Settings.
-    /// `completion` runs on the main thread.
-    func diagnosticsReport(completion: @escaping @MainActor @Sendable (String) -> Void) {
-        scanQueue.async { [weak self] in
-            guard let self else { return }
-            let report = self.buildDiagnosticsReport()
-            DispatchQueue.main.async { completion(report) }
-        }
-    }
-
-    private func buildDiagnosticsReport() -> String {
-        var out = ""
-        out += "wicher diagnostics — \(Date())\n"
-        out += "AXIsProcessTrusted: \(AXIsProcessTrusted())\n"
-        out += "_AXUIElementGetWindow available: \(AXPrivate.isAvailable)\n"
-        out += "CGSCopySpacesForWindows available: \(SpacesPrivate.isAvailable)\n"
-
-        let facts = windowFacts()
-        var byPID: [pid_t: [CGWindowFact]] = [:]
-        for fact in facts { byPID[fact.pid, default: []].append(fact) }
-        out += "CGWindowList(.optionAll) entries: \(facts.count), onscreen: \(facts.filter(\.isOnscreen).count)\n"
-
-        lock.lock()
-        let age = snapshot.map { Date().timeIntervalSince($0.takenAt) }
-        let cachedTitles = caches.titles.count
-        lock.unlock()
-        out += "snapshot age: \(age.map { String(format: "%.2fs", $0) } ?? "none"), cached titles: \(cachedTitles)\n\n"
-
-        // Regular apps, plus menu-bar apps that own something window-like —
-        // their Settings windows are switch targets too.
-        let apps = NSWorkspace.shared.runningApplications
-            .filter { app in
-                !app.isTerminated && (app.activationPolicy == .regular
-                    || (app.activationPolicy == .accessory
-                        && byPID[app.processIdentifier]?.contains(where: \.isPlausibleWindow) == true))
-            }
-        for app in apps {
-            let pid = app.processIdentifier
-            let started = Date()
-            let scan = Self.scanApp(pid: pid, timeout: backgroundTimeout)
-            let ms = Int(Date().timeIntervalSince(started) * 1000)
-            out += "── \(app.localizedName ?? "?") pid=\(pid) hidden=\(app.isHidden) "
-            out += "axWindows=\(scan.windows.count) answered=\(scan.answered) responded=\(scan.responded) [\(ms)ms]\n"
-            for window in scan.windows {
-                let fact = window.wid.flatMap { wid in facts.first { $0.id == wid } }
-                out += "    AX wid=\(window.wid.map(String.init) ?? "-") min=\(window.minimized) "
-                out += "layer=\(fact.map { String($0.layer) } ?? "-") on=\(fact.map { String($0.isOnscreen) } ?? "-") "
-                out += "size=\(fact.map { "\(Int($0.size.width))x\(Int($0.size.height))" } ?? "-") "
-                out += "title=\"\(window.title)\"\n"
-            }
-            let axIDs = Set(scan.windows.compactMap(\.wid))
-            for fact in (byPID[pid] ?? []) where fact.layer == 0 && !axIDs.contains(fact.id) {
-                out += "    CG-only wid=\(fact.id) on=\(fact.isOnscreen) "
-                out += "origin=\(Int(fact.origin.x)),\(Int(fact.origin.y)) size=\(Int(fact.size.width))x\(Int(fact.size.height)) alpha=\(fact.alpha) "
-                out += "plausible=\(fact.isPlausibleWindow) orderedOut=\(fact.isOrderedOut)\n"
-            }
-        }
-        return out
-    }
-
     // MARK: - Watching the system
 
     @MainActor private func cacheScreenSizes() {
@@ -1037,100 +867,5 @@ final class WindowEnumerator: @unchecked Sendable {
                 handler(self, app)
             }
         }
-    }
-
-    // MARK: - AX observers
-
-    private static let observerCallback: AXObserverCallback = { observer, element, notification, refcon in
-        guard let refcon else { return }
-        let enumerator = Unmanaged<WindowEnumerator>.fromOpaque(refcon).takeUnretainedValue()
-        // A new window: watch for it closing. Registering is a round trip to
-        // the app — awake, since it just made the window, but possibly busy —
-        // and this is the main thread, so it goes to the scan queue.
-        if (notification as String) == kAXWindowCreatedNotification {
-            let timeout = enumerator.backgroundTimeout
-            let refconBits = UInt(bitPattern: refcon)   // a raw pointer isn't Sendable; its bits are
-            enumerator.scanQueue.async {
-                guard let refcon = UnsafeMutableRawPointer(bitPattern: refconBits) else { return }
-                observeDestruction(of: [element], with: observer, refcon: refcon, timeout: timeout)
-            }
-        }
-        // The element names the app it belongs to, with no round trip, so
-        // only that app needs asking again.
-        var pid: pid_t = 0
-        let known = AXUIElementGetPid(element, &pid) == .success
-        // The observer's run-loop source is on the main run loop.
-        MainActor.assumeIsolated {
-            if known {
-                enumerator.scheduleRefresh(pid: pid, after: 0.15)
-            } else {
-                enumerator.scheduleRefresh(after: 0.15)
-            }
-        }
-    }
-
-    /// Registers `kAXUIElementDestroyedNotification` on each window, so closing
-    /// one triggers a refresh. The registration dies with the window. Each
-    /// registration is a round trip to the app, bounded by `timeout`.
-    private static func observeDestruction(of windows: [AXUIElement],
-                                           with observer: AXObserver,
-                                           refcon: UnsafeMutableRawPointer,
-                                           timeout: TimeInterval) {
-        for window in windows {
-            AXUIElementSetMessagingTimeout(window, Float(timeout))
-            AXObserverAddNotification(observer, window, kAXUIElementDestroyedNotification as CFString, refcon)
-        }
-    }
-
-    @MainActor private func installObservers(for apps: [NSRunningApplication]) {
-        let selfPID = ProcessInfo.processInfo.processIdentifier
-        let apps = apps
-            .filter { $0.activationPolicy != .prohibited && !$0.isTerminated && $0.processIdentifier != selfPID }
-            .filter { observers[$0.processIdentifier] == nil }
-        guard !apps.isEmpty else { return }
-
-        // Attaching to a sleeping app can block, so do it off the main thread.
-        scanQueue.async { [weak self] in
-            guard let self else { return }
-            let refcon = Unmanaged.passUnretained(self).toOpaque()
-            for app in apps {
-                let pid = app.processIdentifier
-                var observer: AXObserver?
-                guard AXObserverCreate(pid, Self.observerCallback, &observer) == .success,
-                      let observer else { continue }
-                let axApp = AXUIElementCreateApplication(pid)
-                AXUIElementSetMessagingTimeout(axApp, Float(self.backgroundTimeout))
-                var attached = false
-                for name in Self.observedNotifications {
-                    if AXObserverAddNotification(observer, axApp, name as CFString, refcon) == .success {
-                        attached = true
-                    }
-                }
-                guard attached else { continue }
-                var value: CFTypeRef?
-                if AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &value) == .success,
-                   let windows = value as? [AXUIElement] {
-                    Self.observeDestruction(of: windows, with: observer, refcon: refcon,
-                                            timeout: self.backgroundTimeout)
-                }
-                DispatchQueue.main.async {
-                    // The app may have quit while we were attaching; its
-                    // `removeObserver` has already run, and storing this one
-                    // would block a later app that reuses the pid.
-                    guard self.observers[pid] == nil, !app.isTerminated else { return }
-                    self.observers[pid] = observer
-                    CFRunLoopAddSource(CFRunLoopGetMain(),
-                                       AXObserverGetRunLoopSource(observer),
-                                       .defaultMode)
-                }
-            }
-        }
-    }
-
-    @MainActor private func removeObserver(pid: pid_t) {
-        guard let observer = observers.removeValue(forKey: pid) else { return }
-        CFRunLoopRemoveSource(CFRunLoopGetMain(),
-                              AXObserverGetRunLoopSource(observer),
-                              .defaultMode)
     }
 }

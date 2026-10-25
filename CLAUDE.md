@@ -43,9 +43,10 @@ hot keys and the HUD need the assembled `.app`.
 The package is split so the code is testable: `Sources/WicherCore` (library, all the
 code) and `Sources/wicher` (executable: just `main.swift` → `WicherApp.run()`). Tests
 in `Tests/WicherCoreTests` use `@testable import WicherCore` and cover the pure pieces —
-`WindowAssembly` (the scan → rows classification), `WindowGrouping`, `ExceptionRules`, `FuzzyMatcher`,
+`WindowAssembly` (the scan → rows classification, and `reconcile`'s per-summon patch), `WindowGrouping`, `ExceptionRules`, `FuzzyMatcher`,
 `HUDMetrics`, `IconGridLayout`, `TextContrast`, `SwitcherSession` (incl. live updates),
-`HotKeyCombo`, `Settings` (via `Settings(defaults:)` on a test suite) — plus
+`HotKeyCombo`, `SwitcherCommand` (keys → panel commands), `Settings` (via `Settings(defaults:)` on a test suite) — plus
+`SwitcherController`'s session lifecycle (a fake `WindowSource`, injected modifier state and activator),
 `SwitcherListView` and `SwitcherIconGridView` layout rendered offscreen, and the Settings window's panes. Fixtures are hand-built (`axWindow: nil`;
 `AXUIElementCreateApplication` is fine where an element is required — it does no IPC).
 The AX/CGWindowList *collection*, hot keys, activation and the live HUD have no tests;
@@ -97,7 +98,11 @@ database. Flow of one switch:
      either; the Switchers pane says so. Validation is `HotKeyCombo.problem(amongOthers:)`: only bare
      typing keys and chords another switcher uses (incl. its reverse) are refused.
 3. **`SwitcherController`** — session lifecycle and wiring: show-delay, hold-to-repeat,
-   event monitors, panel placement, commit. It drives two pieces:
+   event monitors, panel placement, commit. Its window source (`WindowSource`, which
+   `WindowEnumerator` conforms to), `Settings`, activator and held-modifier reader come in
+   through `init`, defaulting to the real ones — the tests' seam; keep protocol DI to this
+   one. Keys in the panel map to a `SwitcherCommand` (pure, `SwitcherCommand.from`), which
+   `perform(_:)` carries out. It drives two pieces:
    - **`SwitcherSession`** — value-type model of one session: rows for the current query
      (grouped, or fuzzy-scored when searching) and the selection. No views or timers.
    - A **`SwitcherContentView`**, picked per session from `SwitcherProfile.layout`:
@@ -117,9 +122,11 @@ database. Flow of one switch:
    Never before the panel is shown — a quick tap must commit the preselected window.
 4. **`WindowEnumerator`** (singleton) — *collects* AX + CGWindowList input, keeps a
    background snapshot fresh via AX observers, owns the caches and MRU, and produces the
-   **Copy Diagnostics** dump (`diagnosticsReport()`, Settings → General). The decision of which rows
-   exist is **`WindowAssembly.assemble`** — pure, tested; put classification changes
-   there, with a test.
+   **Copy Diagnostics** dump (`diagnosticsReport()`, Settings → General; in
+   `WindowEnumerator+Diagnostics.swift`, the AX observers in `+Observers.swift`). The decision
+   of which rows exist is **`WindowAssembly.assemble`** (a scan) and
+   **`WindowAssembly.reconcile`** (the summon-time patch) — pure, tested; put
+   classification changes there, with a test. `WindowInfo` is a struct.
 5. **`WindowGrouping`** — pure function: `(profile, Enumeration, activePID, DisplayLayout?) → WindowGroups` (main + the merged bottom group).
    Put filtering/ordering policy here, not in the controller; it is the one piece that is
    trivially reasonable about in isolation. Each window falls in one category — minimized,
@@ -145,7 +152,7 @@ database. Flow of one switch:
    timeout). App-only entries get a Dock-click-equivalent reopen.
 
 Settings window: `SettingsWindow` (AppKit window + `NSSplitViewController`, sidebar
-of General / Appearance / Switchers / Exceptions / About) hosting SwiftUI panes (`SettingsViews`: grouped `Form`s).
+of General / Appearance / Switchers / Exceptions / About) hosting SwiftUI panes (grouped `Form`s: `SettingsViews` has the sidebar and detail, one file per pane, `SettingsRows` the shared rows).
 `Settings` is `@Observable`: panes bind straight to it (`@Bindable … = Settings.shared`;
 profile rows by id via `settings[profileID:]`, which survives Remove Switcher) — no copies
 to drift. `SettingsModel` (`@Observable`) holds only what isn't a setting: the pane, the
@@ -164,8 +171,8 @@ the value really changed. There is no change notification: AppKit code watches w
 needs with `Settings.observe` (an `Observations` loop, delivered on a later main-loop
 turn) — `AppController` re-registers hot keys (and re-applies the system override) when
 the shortcuts change, and applies the appearance and menu-bar icon; `SettingsModel`
-refreshes the shortcut notes. `HotKeyCombo.reverse` is nil for a combo with
-Shift. In the panel, `handleKeyDown` subtracts the trigger's modifiers, so ⌘-held typing
+refreshes the shortcut notes (and, while the window is open, polls Accessibility trust itself). `HotKeyCombo.reverse` is nil for a combo with
+Shift. In the panel, `SwitcherCommand.from` subtracts the trigger's modifiers, so ⌘-held typing
 searches when the shortcut is ⌘Tab.
 `HUDMetrics.make(iconSize:textSize:rowPadding:)` derives every pixel dimension — don't
 hardcode row heights or panel widths elsewhere. That includes the corners, which are
@@ -213,16 +220,38 @@ icon cells make their highlight `SurfaceView` lazily, on first selection.
 Rows are re-placed on the scroll view's clip-view frame changes, not in `layout()`:
 inside the glass the scroll view settles after the list view's own layout pass.
 
+## Before adding a change
+
+Check every change against this list; the sections above and below say why.
+
+- Decisions about which rows exist, how they're grouped or ordered go in the pure pieces
+  (`WindowAssembly`, `WindowGrouping`, `SwitcherSession`, `ExceptionRules`), with a test.
+  `WindowEnumerator` collects input, `SwitcherController` wires things up — neither decides.
+- No new `.shared` reads in a class you want tested: take the dependency in `init`,
+  defaulting to `.shared`.
+- Nothing that talks to another process on the summon path: no `NSRunningApplication`
+  property reads or AX messages added to `enumerate()` / `reconcile`; no scanning there.
+- Keep `enumerate()` synchronous — no actor or async `WindowEnumerator`.
+- Row and cell views stay pooled and placed by frame; pixel sizes come from `HUDMetrics` /
+  `IconGridLayout`, never hardcoded.
+- `MainActor.assumeIsolated` only in callbacks known to run on the main run loop.
+- Window titles from AX only — never `kCGWindowName` (it would need Screen Recording).
+- System hot keys are switched off only through `SystemHotKeyOverride`.
+- No third-party dependencies.
+- Changed enumeration? Build the app and confirm it's still alive several seconds after
+  launch. Changed behavior or internals? Update this file; user-facing? `README.md` too.
+- Open work is in `TODO.md`.
+
 ## Invariants worth knowing before changing enumeration
 
 Enumeration is where most of the subtlety lives; past regressions (apps vanishing,
 phantom fullscreen rows, wrong titles) all came from breaking one of the rules below.
-Classification lives in `WindowAssembly` (tested); collection,
-caching, `reconcile` and observers in `WindowEnumerator` (not tested).
+Classification lives in `WindowAssembly` (`assemble`, `reconcile`; tested); collection,
+caching and observers in `WindowEnumerator` (not tested).
 
 **Summon path.** `enumerate()` serves the cached snapshot if it is < `maxSnapshotAge`
-(`refreshInterval` + 2.5 s) old, after `reconcile()` patches it cheaply: CGWindowList
-(which windows still exist / are on this Space), `NSRunningApplication.isHidden`, and
+(`refreshInterval` + 2.5 s) old, after `reconcile()` patches it cheaply (`WindowAssembly.reconcile` decides): CGWindowList
+(which windows still exist / are on this Space), hidden flags from `metaCache`, and
 one AX round trip to the frontmost app only — capped by `reconcileTimeout` (0.05 s;
 `scanApp` gives up at the first timed-out message), so a busy app can't hold the panel.
 Only a missing/stale snapshot triggers a synchronous `performScan`. Background refreshes

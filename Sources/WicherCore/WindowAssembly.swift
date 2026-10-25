@@ -113,6 +113,14 @@ struct AssembledScan {
     let caches: WindowCaches
 }
 
+/// The result of `WindowAssembly.reconcile`.
+struct ReconciledScan {
+    let windows: [WindowInfo]
+    let appsWithoutWindows: [WindowInfo]
+    /// Titles the front app's fresh answer supplied, for `WindowCaches.titles`.
+    let freshTitles: [CGWindowID: String]
+}
+
 enum WindowAssembly {
     /// Layer-0 windows on screen right now — i.e. on the current Space.
     static func currentSpace(_ facts: [CGWindowFact]) -> Set<CGWindowID> {
@@ -271,6 +279,109 @@ enum WindowAssembly {
                              currentSpaceWindowIDs: currentSpace,
                              windowFrames: windowFrames(facts),
                              caches: caches.pruned(to: liveIDs))
+    }
+
+    /// Brings a cached snapshot's rows up to date from cheap, fresh facts —
+    /// the summon path's alternative to a full `assemble`.
+    ///
+    /// - Parameters:
+    ///   - windows, appsWithoutWindows: the snapshot's rows.
+    ///   - facts: a fresh CGWindowList (`.optionAll`, Spaces not resolved).
+    ///   - hiddenByPID: hidden flag of every app still running; a row whose
+    ///     pid is missing belongs to an app that quit and is dropped.
+    ///   - front: the frontmost app and its fresh AX answer. When it
+    ///     `responded`, that answer is authoritative for its windows: closed
+    ///     ones go, new ones come in, minimized flags and titles update.
+    ///   - ownRows: wicher's own windows, read in-process from `NSApp`; the
+    ///     snapshot's are replaced by these.
+    ///   - selfPID: wicher's pid.
+    static func reconcile(windows snapWindows: [WindowInfo],
+                          appsWithoutWindows snapApps: [WindowInfo],
+                          facts: [CGWindowFact],
+                          hiddenByPID: [pid_t: Bool],
+                          front: (meta: AppMeta, scan: AppScan)?,
+                          ownRows: [WindowInfo],
+                          selfPID: pid_t) -> ReconciledScan {
+        var factByID: [CGWindowID: CGWindowFact] = [:]
+        for fact in facts where factByID[fact.id] == nil { factByID[fact.id] = fact }
+        let currentSpace = currentSpace(facts)
+
+        let frontPID = front.flatMap { $0.scan.responded ? $0.meta.pid : nil }
+        var frontWindows: [CGWindowID: ScannedWindow] = [:]
+        for window in front?.scan.windows ?? [] {
+            if let wid = window.wid { frontWindows[wid] = window }
+        }
+
+        var freshTitles: [CGWindowID: String] = [:]
+        var windows: [WindowInfo] = []
+        var seen = Set<CGWindowID>()
+
+        for var window in snapWindows {
+            guard let isHidden = hiddenByPID[window.pid] else { continue }        // app quit
+            if let wid = window.cgWindowID, factByID[wid] == nil { continue }      // window closed
+            if window.pid == selfPID { continue }                                 // see `ownRows`
+
+            // Only a window we can identify can be matched against the fresh
+            // scan; without `_AXUIElementGetWindow` there are no ids at all, and
+            // dropping every front-app window would be a poor way to degrade.
+            if window.pid == frontPID, let wid = window.cgWindowID {
+                guard let fresh = frontWindows[wid] else { continue }
+                window.isMinimized = fresh.minimized
+                window.axWindow = fresh.element
+                if !fresh.title.isEmpty { window.title = fresh.title; freshTitles[wid] = fresh.title }
+            }
+
+            if let wid = window.cgWindowID { seen.insert(wid) }
+            window.isAppHidden = isHidden
+            window.onCurrentSpace = spaceMembership(wid: window.cgWindowID, minimized: window.isMinimized,
+                                                    hidden: isHidden, currentSpace: currentSpace)
+            windows.append(window)
+        }
+
+        // Windows the front app has opened since the snapshot was taken.
+        if let front, frontPID != nil {
+            let meta = front.meta
+            let isHidden = hiddenByPID[meta.pid] ?? meta.isHidden
+            for (wid, window) in frontWindows.sorted(by: { $0.key < $1.key }) where !seen.contains(wid) {
+                guard !window.title.isEmpty else { continue }
+                if let fact = factByID[wid], fact.isFullScreenShim { continue }
+                windows.append(WindowInfo(pid: meta.pid,
+                                          bundleID: meta.bundleID,
+                                          appName: meta.name,
+                                          appIcon: meta.icon,
+                                          title: window.title,
+                                          axWindow: window.element,
+                                          isMinimized: window.minimized,
+                                          isAppHidden: isHidden,
+                                          cgWindowID: wid,
+                                          onCurrentSpace: spaceMembership(wid: wid,
+                                                                          minimized: window.minimized,
+                                                                          hidden: isHidden,
+                                                                          currentSpace: currentSpace)))
+                freshTitles[wid] = window.title
+            }
+        }
+
+        windows.append(contentsOf: ownRows)
+
+        // An app whose last window just closed belongs under "Apps"; one that
+        // just opened its first must leave it.
+        let pidsWithWindows = Set(windows.map(\.pid))
+        var appsWithoutWindows = snapApps.compactMap { entry -> WindowInfo? in
+            guard let isHidden = hiddenByPID[entry.pid], !pidsWithWindows.contains(entry.pid) else { return nil }
+            var entry = entry
+            entry.isAppHidden = isHidden
+            return entry
+        }
+        if let front, let frontPID, !pidsWithWindows.contains(frontPID),
+           !appsWithoutWindows.contains(where: { $0.pid == frontPID }),
+           front.meta.isRegular, front.meta.name != "Unknown" {
+            var row = appOnlyRow(for: front.meta)
+            row.isAppHidden = hiddenByPID[frontPID] ?? front.meta.isHidden
+            appsWithoutWindows.append(row)
+        }
+
+        return ReconciledScan(windows: windows, appsWithoutWindows: appsWithoutWindows, freshTitles: freshTitles)
     }
 
     /// The "Apps" entry for a running app with no windows.

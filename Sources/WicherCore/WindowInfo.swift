@@ -9,18 +9,18 @@ import CoreGraphics
 /// `kAXMinimizedAttribute`) rather than `kCGWindowName`, so it needs only the
 /// Accessibility permission it already requires to raise windows — not the
 /// Screen Recording permission that `kCGWindowName` would demand.
-final class WindowInfo {
+struct WindowInfo {
     let pid: pid_t
     let bundleID: String?
     let appName: String
     let appIcon: NSImage?
-    let title: String
-    let axWindow: AXUIElement?
-    let isMinimized: Bool
-    let isAppHidden: Bool
+    var title: String
+    var axWindow: AXUIElement?
+    var isMinimized: Bool
+    var isAppHidden: Bool
     let isAppOnly: Bool
     let cgWindowID: CGWindowID?
-    let onCurrentSpace: Bool
+    var onCurrentSpace: Bool
 
     init(pid: pid_t,
          bundleID: String?,

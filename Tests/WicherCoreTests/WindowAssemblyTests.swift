@@ -10,25 +10,6 @@ final class WindowAssemblyTests: XCTestCase {
 
     // MARK: - Builders
 
-    private func meta(_ pid: pid_t, _ name: String, hidden: Bool = false, regular: Bool = true) -> AppMeta {
-        AppMeta(pid: pid, bundleID: "test.\(name)", name: name, icon: nil, isHidden: hidden, isRegular: regular)
-    }
-
-    private func fact(_ id: CGWindowID, pid: pid_t, onscreen: Bool = true, layer: Int = 0,
-                      size: CGSize = CGSize(width: 800, height: 600)) -> CGWindowFact {
-        CGWindowFact(id: id, pid: pid, layer: layer, isOnscreen: onscreen, order: Int(id), size: size, alpha: 1)
-    }
-
-    private func ax(_ wid: CGWindowID?, _ title: String, minimized: Bool = false) -> ScannedWindow {
-        ScannedWindow(element: AXUIElementCreateApplication(1), title: title, minimized: minimized, wid: wid)
-    }
-
-    private func answered(_ windows: [ScannedWindow]) -> AppScan {
-        AppScan(windows: windows, answered: !windows.isEmpty, responded: true)
-    }
-
-    private let timedOut = AppScan(windows: [], answered: false, responded: false)
-
     private func assemble(facts: [CGWindowFact],
                           metas: [AppMeta],
                           scans: [pid_t: AppScan],

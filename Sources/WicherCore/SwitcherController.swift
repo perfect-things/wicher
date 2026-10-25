@@ -1,6 +1,16 @@
 import AppKit
 import Carbon.HIToolbox
 
+/// Where a session's windows come from: `WindowEnumerator`, or a fake in
+/// tests. Scoped to `SwitcherController`'s needs.
+protocol WindowSource: AnyObject {
+    @MainActor func enumerate() -> Enumeration
+    @MainActor func latestSnapshot() -> Enumeration?
+    @MainActor func noteFrontmost(pid: pid_t)
+}
+
+extension WindowEnumerator: WindowSource {}
+
 /// Orchestrates a switcher session: summon/advance (with an optional pre-show
 /// delay), hold-to-repeat, event monitors, and commit-on-modifier-release —
 /// all without an event tap.
@@ -16,8 +26,14 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     /// The view for the current (or last) session's layout.
     private var contentView: SwitcherContentView
 
+    private let windows: WindowSource
+    private let settings: Settings
+    private let activate: @MainActor (WindowInfo) -> Void
+    /// The modifier keys physically held now (`NSEvent.modifierFlags`).
+    private let heldModifiers: @MainActor () -> NSEvent.ModifierFlags
+
     /// Non-nil exactly while a session is active.
-    private var session: SwitcherSession?
+    private(set) var session: SwitcherSession?
     private var panelShown = false
     private var hoverGate = HoverGate(pointer: .zero)
     private var pendingShow: DispatchWorkItem?
@@ -44,14 +60,21 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     private let holdInitialDelay: TimeInterval = 0.30
     private let holdRepeatInterval: TimeInterval = 0.05
 
-    override init() {
+    init(windows: WindowSource = WindowEnumerator.shared,
+         settings: Settings = .shared,
+         activate: @escaping @MainActor (WindowInfo) -> Void = WindowActivator.activate,
+         heldModifiers: @escaping @MainActor () -> NSEvent.ModifierFlags = { NSEvent.modifierFlags }) {
+        self.windows = windows
+        self.settings = settings
+        self.activate = activate
+        self.heldModifiers = heldModifiers
         contentView = listView
         super.init()
         listView.rowDelegate = self
         gridView.rowDelegate = self
         panel.contentView = listView
         NotificationCenter.default.addObserver(self, selector: #selector(windowsRefreshed),
-                                               name: WindowEnumerator.didRefresh, object: nil)
+                                               name: WindowEnumerator.didRefresh, object: windows)
     }
 
     /// A background scan finished. If the panel is up, show the fresh state —
@@ -59,7 +82,7 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     /// user's place. Not before the panel is shown: a quick tap must switch to
     /// exactly the window that was preselected.
     @objc private func windowsRefreshed() {
-        guard panelShown, let latest = WindowEnumerator.shared.latestSnapshot(),
+        guard panelShown, let latest = windows.latestSnapshot(),
               session?.update(enumeration: latest) == true else { return }
         renderRows()
         updateSelectionHighlight()
@@ -139,14 +162,14 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
         let activeAppPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         // Make sure the window currently in front is the most-recent one, so a
         // quick tap selects the genuine previous window (see SwitcherSession.init).
-        if let pid = activeAppPID { WindowEnumerator.shared.noteFrontmost(pid: pid) }
+        if let pid = activeAppPID { windows.noteFrontmost(pid: pid) }
         session = SwitcherSession(profile: profile,
-                                  enumeration: WindowEnumerator.shared.enumerate(),
+                                  enumeration: windows.enumerate(),
                                   activeAppPID: activeAppPID,
                                   display: displayLayout(),
-                                  exceptions: ExceptionRules(Settings.shared.exceptionRules),
+                                  exceptions: ExceptionRules(settings.exceptionRules),
                                   forward: forward)
-        if let session { Settings.shared.noteSeenApps(in: session.rows) }
+        if let session { settings.noteSeenApps(in: session.rows) }
         contentView.setQuery("")
         // Without Accessibility trust, every row comes from the CGWindowList
         // fallback, which has no titles — say so rather than silently listing
@@ -164,7 +187,7 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
             startReleaseWatchdog()
         }
 
-        let delay = Settings.shared.showDelayMs
+        let delay = settings.showDelayMs
         if delay <= 0 {
             showPanelNow()
         } else {
@@ -203,7 +226,7 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
         guard let session else { return }
         let target = session.selectedWindow
         endSession()
-        if let target { WindowActivator.activate(target) }
+        if let target { activate(target) }
     }
 
     private func cancel() { endSession() }
@@ -220,7 +243,7 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .flagsChanged]) { [weak self] event in
             guard let self else { return }
             if event.type == .flagsChanged {
-                if self.triggerReleased(by: event) { self.commit() }
+                self.modifiersChanged(event.modifierFlags)
             } else {
                 self.cancel()
             }
@@ -234,17 +257,19 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
         globalMonitor = nil
     }
 
-    /// True when `event` no longer holds the active profile's trigger modifiers.
-    private func triggerReleased(by event: NSEvent) -> Bool {
-        guard let trigger = session?.profile.combo.eventModifierFlags, !trigger.isEmpty else { return false }
-        return !event.modifierFlags.contains(trigger)
+    /// A modifier went down or up: releasing the active profile's trigger
+    /// modifiers commits.
+    func modifiersChanged(_ flags: NSEvent.ModifierFlags) {
+        guard let trigger = session?.profile.combo.eventModifierFlags, !trigger.isEmpty,
+              !flags.contains(trigger) else { return }
+        commit()
     }
 
     /// Whether the trigger's modifiers are physically held right now — read
     /// from the hardware state, not from an event that may never arrive.
     private func triggerHeld() -> Bool {
         guard let trigger = session?.profile.combo.eventModifierFlags, !trigger.isEmpty else { return true }
-        return NSEvent.modifierFlags.contains(trigger)
+        return heldModifiers().contains(trigger)
     }
 
     private func startReleaseWatchdog() {
@@ -261,12 +286,12 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     private func handleLocal(_ event: NSEvent) -> NSEvent? {
         switch event.type {
         case .flagsChanged:
-            if triggerReleased(by: event) { commit() }
+            modifiersChanged(event.modifierFlags)
             return event
         case .scrollWheel:
             // Horizontal scrolling too, for the Icons layout's single row.
             let delta = event.deltaY != 0 ? event.deltaY : event.deltaX
-            if panelShown, Settings.shared.selectOnScroll, delta != 0 {
+            if panelShown, settings.selectOnScroll, delta != 0 {
                 advance(by: delta < 0 ? 1 : -1)
                 return nil
             }
@@ -280,41 +305,30 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     }
 
     private func handleKeyDown(_ event: NSEvent) {
-        // ⌘, opens Settings. Checked before the trigger is subtracted, so with
-        // a ⌘Tab shortcut (⌘ already held) a bare "," does it.
-        if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "," {
+        let command = SwitcherCommand.from(keyCode: Int(event.keyCode),
+                                           modifiers: event.modifierFlags,
+                                           trigger: session?.profile.combo.eventModifierFlags ?? [],
+                                           chars: event.charactersIgnoringModifiers)
+        if let command { perform(command) }
+    }
+
+    func perform(_ command: SwitcherCommand) {
+        switch command {
+        case .openSettings:
             cancel()
             onOpenSettings()
-            return
-        }
-        // The trigger's own modifiers are being held to keep the panel open;
-        // they must not stop ⌘-held typing from searching when the shortcut
-        // is ⌘Tab, nor count as Shift-Tab when the shortcut includes ⇧.
-        let trigger = session?.profile.combo.eventModifierFlags ?? []
-        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting(trigger)
-        switch Int(event.keyCode) {
-        case kVK_Escape:
-            // A search is cleared first; Esc on no search closes the panel.
+        case .cancelOrClear:
             if session?.clearQuery() == true { queryChanged() } else { cancel() }
-        case kVK_Return, kVK_ANSI_KeypadEnter:
+        case .commit:
             commit()
-        case kVK_Tab:
-            advance(by: mods.contains(.shift) ? -1 : 1)
-        case kVK_RightArrow:
-            advance(by: 1)
-        case kVK_LeftArrow:
-            advance(by: -1)
-        case kVK_DownArrow, kVK_UpArrow:
-            moveRows(by: Int(event.keyCode) == kVK_DownArrow ? 1 : -1)
-        case kVK_Delete:
+        case let .advance(step):
+            advance(by: step)
+        case let .moveRows(step):
+            moveRows(by: step)
+        case .deleteBackward:
             if session?.deleteBackward() == true { queryChanged() }
-        default:
-            guard !mods.contains(.command), !mods.contains(.control),
-                  let chars = event.charactersIgnoringModifiers, chars.count == 1,
-                  let scalar = chars.unicodeScalars.first,
-                  scalar.value >= 0x20, scalar.value != 0x7F
-            else { return }
-            session?.appendToQuery(Character(scalar))
+        case let .type(character):
+            session?.appendToQuery(character)
             queryChanged()
         }
     }
@@ -422,7 +436,7 @@ final class SwitcherController: NSObject, SwitcherRowViewDelegate {
     func rowHovered(displayIndex: Int) {
         guard hoverGate.accept(pointer: NSEvent.mouseLocation) else { return }
         contentView.setHovered(rowIndex: displayIndex)
-        guard Settings.shared.selectOnHover, session?.select(rowIndex: displayIndex) == true else { return }
+        guard settings.selectOnHover, session?.select(rowIndex: displayIndex) == true else { return }
         updateSelectionHighlight()
     }
 
