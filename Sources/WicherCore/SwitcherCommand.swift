@@ -42,7 +42,9 @@ enum SwitcherCommand: Equatable {
             guard !mods.contains(.command), !mods.contains(.control),
                   let chars, chars.count == 1,
                   let scalar = chars.unicodeScalars.first,
-                  scalar.value >= 0x20, scalar.value != 0x7F
+                  scalar.value >= 0x20, scalar.value != 0x7F,
+                  // AppKit's function-key range: F-keys, Home/End, ⌦…
+                  !(0xF700...0xF8FF).contains(scalar.value)
             else { return nil }
             return .type(Character(scalar))
         }

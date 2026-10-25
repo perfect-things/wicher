@@ -58,20 +58,61 @@ enum AppCatalog {
     }
 }
 
+/// One titled group of the picker's list.
+struct AppSection: Equatable, Sendable {
+    let title: String
+    let apps: [AppChoice]
+}
+
+extension AppCatalog {
+    /// The picker's list for `query`: running, then seen, then installed
+    /// apps, each app once — in the first section that has it — and only
+    /// sections with a match. Worked out when the query or the sources
+    /// change, not in `body`: it filters a few hundred names.
+    static func sections(running: [AppChoice], seen: [AppChoice], installed: [AppChoice],
+                         query: String) -> [AppSection] {
+        let q = query.trimmed
+        var seenKeys = Set<String>()
+        func unique(_ apps: [AppChoice]) -> [AppChoice] {
+            apps.filter { seenKeys.insert($0.id).inserted && matches($0.app, query: q) }
+        }
+        return [AppSection(title: "Running Now", apps: unique(running)),
+                AppSection(title: "Seen by Wicher", apps: unique(seen)),
+                AppSection(title: "Installed", apps: unique(installed))]
+            .filter { !$0.apps.isEmpty }
+    }
+
+    /// Name or bundle ID contains `query`, ignoring case; an empty query
+    /// matches everything.
+    static func matches(_ app: AppRef, query: String) -> Bool {
+        guard !query.isEmpty else { return true }
+        return app.name.localizedCaseInsensitiveContains(query)
+            || app.bundleID?.localizedCaseInsensitiveContains(query) == true
+    }
+}
+
 /// App icons by bundle ID (else by running app name), cached. Apps that
-/// aren't installed or running get the generic app icon.
+/// aren't installed or running get the generic app icon. Looked up off the
+/// main thread: it takes LaunchServices reads, and for an app known only by
+/// name one per running app (~200).
 @MainActor
 enum AppIcons {
     private static var cache: [String: NSImage] = [:]
 
-    static func icon(for app: AppRef) -> NSImage {
+    /// What a row shows until its icon has been looked up.
+    static let placeholder = NSWorkspace.shared.icon(for: .applicationBundle)
+
+    /// The icon, if it has been looked up already.
+    static func cached(_ app: AppRef) -> NSImage? { cache[app.key] }
+
+    static func icon(for app: AppRef) async -> NSImage {
         if let icon = cache[app.key] { return icon }
-        let icon = lookUp(app) ?? NSWorkspace.shared.icon(for: .applicationBundle)
+        let icon = await Task.detached(priority: .userInitiated) { lookUp(app) }.value ?? placeholder
         cache[app.key] = icon
         return icon
     }
 
-    private static func lookUp(_ app: AppRef) -> NSImage? {
+    nonisolated private static func lookUp(_ app: AppRef) -> NSImage? {
         if let id = app.bundleID {
             if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
                 return NSWorkspace.shared.icon(forFile: url.path)

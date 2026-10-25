@@ -126,8 +126,7 @@ private struct ExceptionTargetIcon: View {
     var body: some View {
         Group {
             if case .app(let app) = target {
-                Image(nsImage: AppIcons.icon(for: app))
-                    .resizable()
+                AppIconView(app: app)
             } else {
                 Text("T")
                     .font(.system(size: 12, weight: .semibold))
@@ -230,28 +229,23 @@ private struct AppPickerSheet: View {
     @State private var selection: String?
     @State private var running: [AppChoice] = []
     @State private var installed: [AppChoice] = []
+    /// `AppCatalog.sections` for the query; see `refreshSections`.
+    @State private var sections: [AppSection] = []
     @State private var choosingFile = false
     @FocusState private var searchFocused: Bool
-
-    private var sections: [(title: String, apps: [AppChoice])] {
-        var seenKeys = Set<String>()
-        func unique(_ apps: [AppChoice]) -> [AppChoice] {
-            apps.filter { seenKeys.insert($0.id).inserted && matches($0) }
-        }
-        let seen = Settings.shared.seenApps.map { AppChoice(app: $0) }
-        return [("Running Now", unique(running)), ("Seen by Wicher", unique(seen)), ("Installed", unique(installed))]
-            .filter { !$0.apps.isEmpty }
-    }
 
     private var selectable: [String] {
         sections.flatMap(\.apps).map(\.id).filter { !existing.contains($0) }
     }
 
-    private func matches(_ choice: AppChoice) -> Bool {
-        let q = query.trimmed
-        guard !q.isEmpty else { return true }
-        return choice.app.name.localizedCaseInsensitiveContains(q)
-            || choice.app.bundleID?.localizedCaseInsensitiveContains(q) == true
+    /// Re-filters the list and selects its first app; on open, a query change
+    /// and the installed apps' arrival. Not in `body`, which runs on every
+    /// keystroke and arrow press, several times over.
+    private func refreshSections() {
+        sections = AppCatalog.sections(running: running,
+                                       seen: Settings.shared.seenApps.map { AppChoice(app: $0) },
+                                       installed: installed, query: query)
+        selection = selectable.first
     }
 
     var body: some View {
@@ -277,10 +271,13 @@ private struct AppPickerSheet: View {
         .onAppear {
             searchFocused = true
             running = AppCatalog.running()
-            selection = selectable.first
+            refreshSections()
         }
-        .task { installed = await AppCatalog.installed() }
-        .onChange(of: query) { selection = selectable.first }
+        .task {
+            installed = await AppCatalog.installed()
+            refreshSections()
+        }
+        .onChange(of: query) { refreshSections() }
         .fileImporter(isPresented: $choosingFile, allowedContentTypes: [.application]) { result in
             guard case .success(let url) = result, let app = AppCatalog.app(at: url),
                   !existing.contains(app.key) else { return }
@@ -387,8 +384,7 @@ private struct AppChoiceRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(nsImage: AppIcons.icon(for: choice.app))
-                .resizable()
+            AppIconView(app: choice.app)
                 .frame(width: 20, height: 20)
             Text(choice.app.name)
                 .lineLimit(1)
@@ -409,5 +405,18 @@ private struct AppChoiceRow: View {
         .id(choice.id)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// An app's icon, looked up off the main thread (`AppIcons`); the generic
+/// app icon until it arrives.
+private struct AppIconView: View {
+    let app: AppRef
+    @State private var icon: NSImage?
+
+    var body: some View {
+        Image(nsImage: AppIcons.cached(app) ?? icon ?? AppIcons.placeholder)
+            .resizable()
+            .task(id: app) { icon = await AppIcons.icon(for: app) }
     }
 }

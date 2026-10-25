@@ -170,31 +170,32 @@ private struct SegmentedPicker<E: CaseIterable & Hashable>: View where E.AllCase
 /// (click, or Space with keyboard navigation). Recording is `ShortcutRecorder`.
 private struct ShortcutField: View {
     var combo: HotKeyCombo
-    @State private var recorder: ShortcutRecorder
+    let validate: (HotKeyCombo) -> String?
+    let onChange: (HotKeyCombo) -> Void
+    let onRecordingChanged: (Bool) -> Void
+    /// Made on appear, not in `init`: a view's `init` runs on every parent
+    /// render, and `State(initialValue:)` would build (and drop) a recorder
+    /// each time. Its closures only look things up by profile id, so the
+    /// first render's are as good as any later one's.
+    @State private var recorder: ShortcutRecorder?
 
-    /// The closures are wired once, when the recorder is created: they only
-    /// look things up by profile id, so later renders' copies are no different.
-    init(combo: HotKeyCombo, validate: @escaping (HotKeyCombo) -> String?,
-         onChange: @escaping (HotKeyCombo) -> Void, onRecordingChanged: @escaping (Bool) -> Void) {
-        self.combo = combo
-        _recorder = State(initialValue: {
+    var body: some View {
+        Group {
+            let button = Button { recorder?.toggleRecording() } label: {
+                Text(recorder?.title ?? combo.displayString).frame(minWidth: 72)
+            }
+            if recorder?.isRecording == true { button.buttonStyle(.borderedProminent) } else { button.buttonStyle(.bordered) }
+        }
+        .help("Click, then press the new shortcut. Esc cancels.")
+        .onAppear {
+            guard recorder == nil else { return }
             let recorder = ShortcutRecorder(combo: combo)
             recorder.validate = validate
             recorder.onChange = onChange
             recorder.onRecordingChanged = onRecordingChanged
-            return recorder
-        }())
-    }
-
-    var body: some View {
-        Group {
-            let button = Button(action: recorder.toggleRecording) {
-                Text(recorder.title).frame(minWidth: 72)
-            }
-            if recorder.isRecording { button.buttonStyle(.borderedProminent) } else { button.buttonStyle(.bordered) }
+            self.recorder = recorder
         }
-        .help("Click, then press the new shortcut. Esc cancels.")
-        .onChange(of: combo) { _, new in if !recorder.isRecording { recorder.combo = new } }
-        .onDisappear(perform: recorder.stopRecording)   // card removed or window closed
+        .onChange(of: combo) { _, new in if recorder?.isRecording == false { recorder?.combo = new } }
+        .onDisappear { recorder?.stopRecording() }   // card removed or window closed
     }
 }

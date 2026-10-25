@@ -45,6 +45,20 @@ final class SwitcherCommandTests: XCTestCase {
         XCTAssertNil(command(kVK_ANSI_A, chars: "ab"))
     }
 
+    /// F-keys, Home/End, ⌦ etc. arrive as AppKit's private-use characters.
+    func testFunctionKeyCharactersAreNotTyped() {
+        func key(_ code: Int) -> String { String(UnicodeScalar(code)!) }
+        XCTAssertNil(command(kVK_F1, chars: key(NSF1FunctionKey)))
+        XCTAssertNil(command(kVK_F19, chars: key(NSF19FunctionKey)))
+        XCTAssertNil(command(kVK_Home, chars: key(NSHomeFunctionKey)))
+        XCTAssertNil(command(kVK_End, chars: key(NSEndFunctionKey)))
+        XCTAssertNil(command(kVK_ForwardDelete, chars: key(NSDeleteFunctionKey)))
+        XCTAssertNil(command(kVK_PageUp, chars: key(NSPageUpFunctionKey)))
+        XCTAssertNil(command(0, chars: "\u{F8FF}"))
+        XCTAssertEqual(command(0, chars: "\u{F6FF}"), .type("\u{F6FF}"))
+        XCTAssertEqual(command(0, chars: "\u{F900}"), .type("\u{F900}"))
+    }
+
     func testDeviceDependentBitsAreIgnored() {
         let raw = NSEvent.ModifierFlags(rawValue: NSEvent.ModifierFlags.option.rawValue | 0x20)
         XCTAssertEqual(command(kVK_ANSI_X, raw, chars: "x"), .type("x"))

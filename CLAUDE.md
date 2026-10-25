@@ -43,7 +43,7 @@ hot keys and the HUD need the assembled `.app`.
 The package is split so the code is testable: `Sources/WicherCore` (library, all the
 code) and `Sources/wicher` (executable: just `main.swift` → `WicherApp.run()`). Tests
 in `Tests/WicherCoreTests` use `@testable import WicherCore` and cover the pure pieces —
-`WindowAssembly` (the scan → rows classification, and `reconcile`'s per-summon patch), `WindowGrouping`, `ExceptionRules`, `FuzzyMatcher`,
+`WindowAssembly` (the scan → rows classification, and `reconcile`'s per-summon patch), `WindowGrouping`, `ExceptionRules`, `AppCatalog.sections` (the app picker's list), `FuzzyMatcher`,
 `HUDMetrics`, `IconGridLayout`, `TextContrast`, `SwitcherSession` (incl. live updates),
 `HotKeyCombo`, `SwitcherCommand` (keys → panel commands), `Settings` (via `Settings(defaults:)` on a test suite) — plus
 `SwitcherController`'s session lifecycle (a fake `WindowSource`, injected modifier state and activator),
@@ -158,7 +158,9 @@ profile rows by id via `settings[profileID:]`, which survives Remove Switcher) �
 to drift. `SettingsModel` (`@Observable`) holds only what isn't a setting: the pane, the
 cached login-item status and the shortcut notes. The Exceptions pane's app picker lists
 running Dock apps, `Settings.seenApps` (apps that had a row, recorded at session start —
-how loginwindow & co. get in) and a shallow scan of the Applications folders. The shortcut button is a SwiftUI `Button`
+how loginwindow & co. get in) and a shallow scan of the Applications folders; its list is `AppCatalog.sections`, re-filtered
+when the query or sources change (not in `body`), and icons load off the main thread (`AppIcons`,
+placeholder until then — a name-only app's lookup walks every running app). The shortcut button is a SwiftUI `Button`
 over the `ShortcutRecorder` model.
 The window sets `autorecalculatesKeyViewLoop`: the sidebar and the pane are separate hosting
 views, and without it AppKit's key-view loop is computed for the first pane only — on the
