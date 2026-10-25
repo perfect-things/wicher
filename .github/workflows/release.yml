@@ -89,11 +89,21 @@ jobs:
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
+        # What's New comes from .github/release-notes/$TAG.md (written by `just release`);
+        # without one, GitHub's commit list stands in.
         run: |
+          NOTES="$RUNNER_TEMP/notes.md"
+          GENERATE=()
+          if [[ -s ".github/release-notes/$TAG.md" ]]; then
+            { echo "## What's New"; echo; cat ".github/release-notes/$TAG.md"; echo; } > "$NOTES"
+          else
+            GENERATE=(--generate-notes)
+          fi
+          cat .github/release-notes.md >> "$NOTES"
           gh release create "$TAG" "$ZIP" "$DMG" \
             --title "Wicher $VERSION" \
-            --notes-file .github/release-notes.md \
-            --generate-notes
+            --notes-file "$NOTES" \
+            "${GENERATE[@]}"
 
       - name: Bump Homebrew cask
         env:

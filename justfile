@@ -37,13 +37,27 @@ icon:
 signing-identity:
     scripts/make-signing-identity.sh
 
-# Bump the version, commit, tag and push; CI builds the release and bumps the Homebrew cask
+# Write release notes (Claude + app-store-changelog skill, then $EDITOR), bump the version,
+# commit, tag and push; CI builds the release and bumps the Homebrew cask
 release version:
     #!/usr/bin/env bash
     set -euo pipefail
-    [[ -z "$(git status --porcelain)" ]] || { echo "✗ Working tree not clean" >&2; exit 1; }
+    notes=".github/release-notes/v{{version}}.md"
+    # A notes file left by an aborted run is reused, so it doesn't count as dirty.
+    [[ -z "$(git status --porcelain -- . ":!$notes")" ]] || { echo "✗ Working tree not clean" >&2; exit 1; }
+    if [[ ! -s "$notes" ]]; then
+        since="$(git describe --tags --abbrev=0)"
+        echo "Writing release notes for changes since $since…"
+        mkdir -p "$(dirname "$notes")"
+        echo "Use the app-store-changelog skill to write release notes for Wicher {{version}} (a macOS window switcher), covering every change since $since. This text goes on the GitHub release page. Reply with only the notes: Markdown, '- ' bullets, optionally under '### New' / '### Improved' / '### Fixed' headings, no title, no preamble, no questions. If nothing is user-facing, reply with one bullet saying so." \
+            | claude -p --allowedTools "Skill Read Grep Glob Bash(git log:*) Bash(git diff:*) Bash(git show:*) Bash(.agents/skills/app-store-changelog/scripts/collect_release_changes.sh:*)" \
+            > "$notes"
+    fi
+    ${EDITOR:-vi} "$notes"
+    grep -q '[^[:space:]]' "$notes" || { echo "✗ $notes is empty; not releasing" >&2; exit 1; }
     build=$(( $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' Info.plist) + 1 ))
     /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString {{version}}" -c "Set :CFBundleVersion $build" Info.plist
+    git add "$notes"
     git commit -qam "Wicher {{version}}"
     git tag "v{{version}}"
     git push --atomic origin HEAD "v{{version}}"
