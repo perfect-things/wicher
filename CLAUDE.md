@@ -294,6 +294,10 @@ At launch `SwitcherController.warmUp()` renders a dummy session into the hidden 
   `appsWithAXWindows`, or fullscreen apps sprout phantom rows). It emits a row per
   *confident* window (on-screen, or previously titled via AX); otherwise, for `.regular`
   apps only, one `representativeWindow` (prefers display-sized = fullscreen Space).
+  Such a row is minimized if the cache says so, or if the window is off screen yet in a
+  display's current Space and its app isn't hidden (`CGWindowFact.isInCurrentSpace`, via
+  `SpacesPrivate`; full scans only) — AX can answer with no windows for a minimized one,
+  and without this it read as "other Space" (issue #6).
 - `AppScan.answered` separates "AX replied with zero windows" from "AX timed out" — keep
   them distinct; conflating them is what caused the original disappearing-app bugs.
 - **"Apps without windows"** lists only `.regular` apps that produced no row from either

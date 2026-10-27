@@ -66,7 +66,7 @@ extension WindowEnumerator {
             for fact in (byPID[pid] ?? []) where fact.layer == 0 && !axIDs.contains(fact.id) {
                 out += "    CG-only wid=\(fact.id) on=\(fact.isOnscreen) "
                 out += "origin=\(Int(fact.origin.x)),\(Int(fact.origin.y)) size=\(Int(fact.size.width))x\(Int(fact.size.height)) alpha=\(fact.alpha) "
-                out += "plausible=\(fact.isPlausibleWindow) orderedOut=\(fact.isOrderedOut)\n"
+                out += "plausible=\(fact.isPlausibleWindow) orderedOut=\(fact.isOrderedOut) inCurrentSpace=\(fact.isInCurrentSpace)\n"
             }
         }
         return out

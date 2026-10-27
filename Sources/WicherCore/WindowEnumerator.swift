@@ -703,13 +703,15 @@ final class WindowEnumerator: @unchecked Sendable {
     /// and size. Reading those does NOT require Screen Recording; only
     /// `kCGWindowName` would.
     ///
-    /// `resolvingSpaces` also sets `isOrderedOut` — one window-server call per
-    /// plausible off-screen window, so not on the summon path (`reconcile`).
+    /// `resolvingSpaces` also sets `isOrderedOut` and `isInCurrentSpace` — one
+    /// window-server call per plausible off-screen window plus one for the
+    /// displays' current Spaces, so not on the summon path (`reconcile`).
     func windowFacts(resolvingSpaces: Bool = true) -> [CGWindowFact] {
         let options: CGWindowListOption = [.optionAll, .excludeDesktopElements]
         guard let infos = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
             return []
         }
+        let currentSpaces = resolvingSpaces ? SpacesPrivate.currentSpaces() : nil
         var facts: [CGWindowFact] = []
         facts.reserveCapacity(infos.count)
         for (index, info) in infos.enumerated() {
@@ -730,7 +732,10 @@ final class WindowEnumerator: @unchecked Sendable {
                                     alpha: (info[kCGWindowAlpha as String] as? Double) ?? 1,
                                     origin: rect.origin)
             if resolvingSpaces, !fact.isOnscreen, fact.isPlausibleWindow {
-                fact.isOrderedOut = SpacesPrivate.isInAnySpace(number) == false
+                if let spaces = SpacesPrivate.spaces(of: number) {
+                    fact.isOrderedOut = spaces.isEmpty
+                    if let currentSpaces { fact.isInCurrentSpace = !spaces.isDisjoint(with: currentSpaces) }
+                }
             }
             facts.append(fact)
         }

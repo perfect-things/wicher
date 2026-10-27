@@ -198,6 +198,40 @@ final class WindowAssemblyTests: XCTestCase {
         XCTAssertEqual(titles(r), ["Draft"])
     }
 
+    func testUnlistedWindowInCurrentSpaceIsMinimized() {
+        // Issue #6: AX answers with no windows, the cache never saw the window,
+        // but it is off screen in the current Space — so it is minimized, not
+        // on another Space.
+        var window = fact(210, pid: 21, onscreen: false)
+        window.isInCurrentSpace = true
+        let r = assemble(facts: [window, fact(211, pid: 22, onscreen: false)],
+                         metas: [meta(21, "Zen"), meta(22, "Slack")],
+                         scans: [21: answered([]), 22: answered([])])
+        XCTAssertEqual(r.windows.map(\.isMinimized), [true, false])
+        XCTAssertEqual(r.windows.map(\.onCurrentSpace), [true, false])
+    }
+
+    func testCurrentSpaceOverridesStaleCachedNotMinimized() {
+        // AX last saw the window un-minimized; since then it was minimized and
+        // AX stopped listing it.
+        var caches = WindowCaches()
+        caches.titles[230] = "Page"
+        caches.minimized[230] = false
+        var window = fact(230, pid: 24, onscreen: false)
+        window.isInCurrentSpace = true
+        let r = assemble(facts: [window], metas: [meta(24, "Zen")], scans: [24: answered([])], caches: caches)
+        XCTAssertEqual(r.windows.map(\.isMinimized), [true])
+        XCTAssertEqual(r.caches.minimized[230], false, "the cache holds only what AX said")
+    }
+
+    func testHiddenAppWindowInCurrentSpaceIsNotMinimized() {
+        var window = fact(220, pid: 23, onscreen: false)
+        window.isInCurrentSpace = true
+        let r = assemble(facts: [window], metas: [meta(23, "Zen", hidden: true)], scans: [23: timedOut])
+        XCTAssertEqual(r.windows.map(\.isMinimized), [false])
+        XCTAssertEqual(r.windows.map(\.isAppHidden), [true])
+    }
+
     // MARK: - Spaces
 
     func testSpaceMembership() {

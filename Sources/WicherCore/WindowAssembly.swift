@@ -27,6 +27,10 @@ struct CGWindowFact {
     /// both would otherwise pass for a window on another Space. Only resolved
     /// for off-screen windows during a full scan (see `SpacesPrivate`).
     var isOrderedOut = false
+    /// Off screen, yet in a display's current Space: minimized, or its app is
+    /// hidden — not on another Space. The one minimized signal that doesn't
+    /// need the app's AX answer. Resolved like `isOrderedOut`.
+    var isInCurrentSpace = false
     /// Top-left corner in global display coordinates (origin at the top left
     /// of the main display, y down), as `kCGWindowBounds` reports it.
     var origin = CGPoint.zero
@@ -92,7 +96,8 @@ struct WindowCaches {
     /// CGWindowList can still be raised individually.
     var elements: [CGWindowID: AXUIElement] = [:]
     /// Last known minimized flag. CGWindowList cannot tell a minimized window
-    /// from one on another Space, but AX told us the last time it answered.
+    /// from one on another Space (`CGWindowFact.isInCurrentSpace` can, but only
+    /// on the current one), but AX told us the last time it answered.
     var minimized: [CGWindowID: Bool] = [:]
 
     /// Drops entries for windows that no longer exist.
@@ -240,7 +245,11 @@ enum WindowAssembly {
                 : confident
 
             for fact in chosen {
-                let minimized = caches.minimized[fact.id] ?? false
+                // AX may not list a minimized window at all (issue #6), and the
+                // cache only knows what AX once said; a window off screen in a
+                // current Space of a visible app can only be minimized. One
+                // minimized on another Space still needs the cache.
+                let minimized = caches.minimized[fact.id] == true || (fact.isInCurrentSpace && !meta.isHidden)
                 windows.append(WindowInfo(pid: meta.pid,
                                           bundleID: meta.bundleID,
                                           appName: meta.name,
@@ -329,6 +338,13 @@ enum WindowAssembly {
                 window.isMinimized = fresh.minimized
                 window.axWindow = fresh.element
                 if !fresh.title.isEmpty { window.title = fresh.title; freshTitles[wid] = fresh.title }
+            }
+
+            // A minimized window is never on screen; one that is again was
+            // un-minimized, whether or not its app told AX (a fallback row's
+            // flag would otherwise last until the next rescan).
+            if window.isMinimized, let wid = window.cgWindowID, factByID[wid]?.isOnscreen == true {
+                window.isMinimized = false
             }
 
             if let wid = window.cgWindowID { seen.insert(wid) }

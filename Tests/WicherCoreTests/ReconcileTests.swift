@@ -46,6 +46,14 @@ final class ReconcileTests: XCTestCase {
         XCTAssertEqual(r.windows.map(\.onCurrentSpace), [true], "minimized counts as current")
     }
 
+    func testWindowBackOnScreenIsNoLongerMinimized() {
+        // Not the front app, so no fresh AX answer: on screen alone clears it.
+        let r = reconcile([window("Doc", pid: 2, minimized: true, wid: 10),
+                           window("Other", pid: 2, minimized: true, wid: 11)],
+                          facts: [fact(10, pid: 2), fact(11, pid: 2, onscreen: false)])
+        XCTAssertEqual(r.windows.map(\.isMinimized), [false, true])
+    }
+
     func testFrontWindowTitleRefreshed() {
         let r = reconcile([window("Old", pid: 1, wid: 10)], facts: [fact(10, pid: 1)],
                           front: (meta(1, "Pages"), answered([ax(10, "New")])))
