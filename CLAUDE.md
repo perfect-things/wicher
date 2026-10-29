@@ -4,12 +4,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository shape
 
-The repo root is the Swift package (`Package.swift`, `Sources/`, `Tests/`, `Resources/`,
-`Info.plist`).
-
-- `scripts/` — every shell script: `build.sh`, `make-icon.sh`,
-  `make-signing-identity.sh`. Each `cd`s to the repo root itself, so they run from
-  anywhere.
 - `README.md` — short user-facing overview: install, usage, build. Keep it to the
   essentials; internals belong here, not there.
 
@@ -24,10 +18,6 @@ open Wicher.app       # first launch prompts for Accessibility
 swift test            # unit tests (WicherCoreTests)
 ```
 
-The `justfile` wraps these (`build`, `test`, `run` = build + relaunch, `install` = build + copy
-to /Applications, `snapshot`,
-`icon`, `signing-identity`, `clean`); plain `just` lists them.
-
 App icon: `Resources/Wicher.icon` (Icon Composer; light/dark/tinted/clear). Run
 `scripts/make-icon.sh` after editing it — it needs full Xcode and regenerates the
 committed `Resources/Assets.car` (read via `CFBundleIconName`) and `Resources/preview/`; `build.sh` only copies them, so CLT-only builds still work.
@@ -40,14 +30,7 @@ built against that SDK — no macOS 27 behaviors (e.g. it adds automatic menu ic
 `swift build` alone compiles but produces a bare binary, not the `LSUIElement` bundle —
 hot keys and the HUD need the assembled `.app`.
 
-The package is split so the code is testable: `Sources/WicherCore` (library, all the
-code) and `Sources/wicher` (executable: just `main.swift` → `WicherApp.run()`). Tests
-in `Tests/WicherCoreTests` use `@testable import WicherCore` and cover the pure pieces —
-`WindowAssembly` (the scan → rows classification, and `reconcile`'s per-summon patch), `WindowGrouping`, `ExceptionRules`, `AppCatalog.sections` (the app picker's list), `FuzzyMatcher`,
-`HUDMetrics`, `IconGridLayout`, `TextContrast`, `SwitcherSession` (incl. live updates),
-`HotKeyCombo`, `SwitcherCommand` (keys → panel commands), `Settings` (via `Settings(defaults:)` on a test suite) — plus
-`SwitcherController`'s session lifecycle (a fake `WindowSource`, injected modifier state and activator),
-`SwitcherListView` and `SwitcherIconGridView` layout rendered offscreen, and the Settings window's panes. Fixtures are hand-built (`axWindow: nil`;
+Test fixtures are hand-built (`axWindow: nil`;
 `AXUIElementCreateApplication` is fine where an element is required — it does no IPC).
 The AX/CGWindowList *collection*, hot keys, activation and the live HUD have no tests;
 verify those by building the app, granting Accessibility, and exercising ⌥Tab. Set
@@ -61,17 +44,8 @@ Accessibility grant survives. Ad-hoc signing changes the cdhash every build and 
 re-prompts; toggling Wicher off/on in System Settings → Privacy & Security →
 Accessibility is the fix when the HUD suddenly lists nothing (it also shows a notice).
 
-Release: `just release x.y.z` first has headless `claude -p` write user-facing notes
-with the `app-store-changelog` skill (changes since the last tag) into
-`.github/release-notes/vx.y.z.md` and opens it in `$EDITOR` (empty → abort; an aborted
-run's file is reused), then commits it with the `Info.plist` bump, tags `vx.y.z` and pushes;
-`.github/workflows/release.yml` (`xcode-27` runner: the code needs the macOS 27 SDK) checks tag = plist version, runs tests,
-imports the "Wicher Development" p12 (secret `SIGNING_P12`/`SIGNING_P12_PASSWORD`) and
-fails rather than ship an ad-hoc build, publishes `Wicher-x.y.z.zip` + `.dmg` (body: that
-notes file as "What's New" + `.github/release-notes.md`'s install section; no notes file →
-GitHub's generated commit list), then pushes
-the new version/sha256 to `Casks/wicher.rb` in `perfect-things/homebrew-tap` (deploy key
-`TAP_DEPLOY_KEY`). The cask's `url` must keep matching the zip's name.
+Release: `just release x.y.z`; the pipeline (notes, CI, signing, Homebrew cask) is in the
+`release` skill (`.claude/skills/release`).
 
 ## Architecture
 
